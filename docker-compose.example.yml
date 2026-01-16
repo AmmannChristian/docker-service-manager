@@ -1,0 +1,148 @@
+version: "3.9"
+
+# Use: docker compose --profile dev up
+# Use: docker compose --profile prod up
+services:
+  docker-socket-proxy-ro:
+    profiles: ["dev", "prod"]
+    image: tecnativa/docker-socket-proxy:latest
+    container_name: docker-socket-proxy-ro
+    environment:
+      CONTAINERS: 1
+      EVENTS: 1
+      INFO: 1
+      NETWORKS: 1
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    networks:
+      - proxy
+    restart: unless-stopped
+
+  docker-socket-proxy-rw:
+    profiles: ["dev", "prod"]
+    image: tecnativa/docker-socket-proxy:latest
+    container_name: docker-socket-proxy-rw
+    environment:
+      CONTAINERS: 1
+      IMAGES: 1
+      EVENTS: 1
+      INFO: 1
+      NETWORKS: 1
+      POST: 1
+      DELETE: 1
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    networks:
+      - proxy
+    restart: unless-stopped
+
+  traefik-dev:
+    profiles: ["dev"]
+    image: traefik:v3.1
+    container_name: traefik-dev
+    command:
+      - "--providers.docker=true"
+      - "--providers.docker.exposedbydefault=false"
+      - "--providers.docker.endpoint=${DSM_DEV_DOCKER_HOST:-tcp://docker-socket-proxy-ro:2375}"
+      - "--providers.docker.network=proxy"
+      - "--entrypoints.web.address=:80"
+      - "--entrypoints.web.http.redirections.entrypoint.to=websecure"
+      - "--entrypoints.web.http.redirections.entrypoint.scheme=https"
+      - "--entrypoints.websecure.address=:443"
+      - "--entrypoints.websecure.http.tls.certificates[0].certFile=/certs/dsm.localhost.pem"
+      - "--entrypoints.websecure.http.tls.certificates[0].keyFile=/certs/dsm.localhost-key.pem"
+      - "--api.dashboard=true"
+    depends_on:
+      - docker-socket-proxy-ro
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./traefik/dev/certs:/certs:ro
+    networks:
+      - proxy
+    restart: unless-stopped
+
+  traefik:
+    profiles: ["prod"]
+    image: traefik:v3.1
+    container_name: traefik
+    command:
+      - "--providers.docker=true"
+      - "--providers.docker.exposedbydefault=false"
+      - "--providers.docker.endpoint=${DSM_PROD_DOCKER_HOST:-tcp://docker-socket-proxy-ro:2375}"
+      - "--providers.docker.network=proxy"
+      - "--entrypoints.web.address=:80"
+      - "--entrypoints.web.http.redirections.entrypoint.to=websecure"
+      - "--entrypoints.web.http.redirections.entrypoint.scheme=https"
+      - "--entrypoints.websecure.address=:443"
+      - "--certificatesresolvers.letsencrypt.acme.email=you@example.com"
+      - "--certificatesresolvers.letsencrypt.acme.storage=/acme/acme.json"
+      - "--certificatesresolvers.letsencrypt.acme.tlschallenge=true"
+    depends_on:
+      - docker-socket-proxy-ro
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./traefik/prod/acme:/acme
+    networks:
+      - proxy
+    restart: unless-stopped
+
+  docker-service-manager-dev:
+    profiles: ["dev"]
+    image: docker-service-manager-dev:latest
+    build:
+      context: .
+      target: dev
+    container_name: docker-service-manager-dev
+    environment:
+      - QUARKUS_PROFILE=dev
+      - QUARKUS_HTTP_PORT=9000
+      - DOCKER_HOST=${DSM_DEV_DOCKER_HOST:-tcp://docker-socket-proxy-rw:2375}
+    depends_on:
+      - docker-socket-proxy-rw
+    networks:
+      - proxy
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.dsm-dev.rule=Host(`dsm.localhost`)"
+      - "traefik.http.routers.dsm-dev.entrypoints=websecure"
+      - "traefik.http.routers.dsm-dev.tls=true"
+      - "traefik.http.services.dsm-dev.loadbalancer.server.port=9000"
+    restart: unless-stopped
+
+  docker-service-manager:
+    profiles: ["prod"]
+    image: docker-service-manager:latest
+    build:
+      context: .
+      target: prod
+    container_name: docker-service-manager
+    environment:
+      - QUARKUS_HTTP_PORT=9000
+      - DOCKER_HOST=${DSM_PROD_DOCKER_HOST:-tcp://docker-socket-proxy-rw:2375}
+    depends_on:
+      - docker-socket-proxy-rw
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=64m
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    init: true
+    networks:
+      - proxy
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.dsm.rule=Host(`dsm.example.com`)"
+      - "traefik.http.routers.dsm.entrypoints=websecure"
+      - "traefik.http.routers.dsm.tls.certresolver=letsencrypt"
+      - "traefik.http.services.dsm.loadbalancer.server.port=9000"
+    restart: unless-stopped
+
+networks:
+  proxy:
+    driver: bridge

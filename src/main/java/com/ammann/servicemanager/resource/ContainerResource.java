@@ -42,7 +42,7 @@ import org.jboss.resteasy.reactive.RestStreamElementType;
 @Tag(name = "Container Management", description = "Docker container lifecycle and log management")
 @Produces(MediaType.APPLICATION_JSON)
 @Consumes(MediaType.APPLICATION_JSON)
-@RolesAllowed("ADMIN_ROLE")
+@RolesAllowed("SUPER_ADMIN_ROLE")
 public class ContainerResource {
 
     private static final String CONTAINER_ID_PATTERN = "^[a-fA-F0-9]{12,64}$";
@@ -77,6 +77,7 @@ public class ContainerResource {
                     boolean showAll) {
 
         logger.debugf("Listing containers (showAll=%s)", showAll);
+
         return containerService.listContainers(showAll);
     }
 
@@ -102,6 +103,7 @@ public class ContainerResource {
 
         logger.infof("Restarting container: %s", containerId);
         containerService.restartContainer(containerId);
+
         return Response.noContent().build();
     }
 
@@ -125,6 +127,7 @@ public class ContainerResource {
 
         logger.infof("Starting container: %s", containerId);
         containerService.startContainer(containerId);
+
         return Response.noContent().build();
     }
 
@@ -148,6 +151,7 @@ public class ContainerResource {
 
         logger.infof("Stopping container: %s", containerId);
         containerService.stopContainer(containerId);
+
         return Response.noContent().build();
     }
 
@@ -173,6 +177,7 @@ public class ContainerResource {
 
         logger.infof("Updating container: %s", containerId);
         containerService.updateContainer(containerId);
+
         return Response.noContent().build();
     }
 
@@ -209,6 +214,7 @@ public class ContainerResource {
                     int tail) {
 
         logger.debugf("Fetching logs for container %s (tail=%d)", containerId, tail);
+
         return containerService.getContainerLogs(containerId, tail);
     }
 
@@ -242,6 +248,7 @@ public class ContainerResource {
                     boolean follow) {
 
         logger.infof("Starting log stream for container %s (follow=%s)", containerId, follow);
+
         return containerService.streamContainerLogs(containerId, follow);
     }
 }

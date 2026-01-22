@@ -56,13 +56,13 @@ cd docker-service-manager
 ./mvnw quarkus:dev
 ```
 
-The API will be available at `http://localhost:8080`. The Quarkus Dev UI is accessible at `http://localhost:8080/q/dev/`.
+The API will be available at `http://localhost:9000`. The Quarkus Dev UI is accessible at `http://localhost:9000/q/dev/`.
 
 ## Configuration
 
 ### Environment Variables
 
-The application requires the following environment variables for OIDC authentication:
+#### OIDC Authentication
 
 | Variable | Description | Required |
 |----------|-------------|----------|
@@ -72,6 +72,17 @@ The application requires the following environment variables for OIDC authentica
 | `OIDC_JWT_KEY_ID` | Key ID for JWT signing | Yes |
 | `OIDC_JWT_LIFESPAN` | JWT token lifespan in seconds (default: 300) | No |
 | `OIDC_JWT_AUDIENCE` | JWT audience claim | No |
+
+#### HTTP Server
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `HTTP_CORS_ENABLED` | Enable CORS support | `true` |
+| `HTTP_CORS_ORIGINS` | Allowed CORS origins (regex) | `/.*/` |
+| `HTTP_CORS_METHODS` | Allowed HTTP methods | `GET,POST,PUT,DELETE,OPTIONS` |
+| `HTTP_CORS_HEADERS` | Allowed request headers | `accept,authorization,content-type,x-requested-with` |
+| `HTTP_CORS_EXPOSED_HEADERS` | Headers exposed to clients | `content-disposition` |
+| `HTTP2_ENABLED` | Enable HTTP/2 support | `true` |
 
 ### Example Configuration
 
@@ -117,7 +128,7 @@ All endpoints require authentication and the `ADMIN_ROLE` role.
 ### List Containers
 
 ```bash
-curl -X GET "http://localhost:8080/api/v1/containers?all=true" \
+curl -X GET "http://localhost:9000/api/v1/containers?all=true" \
   -H "Authorization: Bearer <token>"
 ```
 
@@ -127,21 +138,21 @@ Query parameters:
 ### Start Container
 
 ```bash
-curl -X POST "http://localhost:8080/api/v1/containers/{containerId}/start" \
+curl -X POST "http://localhost:9000/api/v1/containers/{containerId}/start" \
   -H "Authorization: Bearer <token>"
 ```
 
 ### Stop Container
 
 ```bash
-curl -X POST "http://localhost:8080/api/v1/containers/{containerId}/stop" \
+curl -X POST "http://localhost:9000/api/v1/containers/{containerId}/stop" \
   -H "Authorization: Bearer <token>"
 ```
 
 ### Restart Container
 
 ```bash
-curl -X POST "http://localhost:8080/api/v1/containers/{containerId}/restart" \
+curl -X POST "http://localhost:9000/api/v1/containers/{containerId}/restart" \
   -H "Authorization: Bearer <token>"
 ```
 
@@ -150,14 +161,14 @@ curl -X POST "http://localhost:8080/api/v1/containers/{containerId}/restart" \
 Pulls the latest version of the container image and recreates the container with the same configuration.
 
 ```bash
-curl -X POST "http://localhost:8080/api/v1/containers/{containerId}/update" \
+curl -X POST "http://localhost:9000/api/v1/containers/{containerId}/update" \
   -H "Authorization: Bearer <token>"
 ```
 
 ### Get Container Logs
 
 ```bash
-curl -X GET "http://localhost:8080/api/v1/containers/{containerId}/logs?tail=100" \
+curl -X GET "http://localhost:9000/api/v1/containers/{containerId}/logs?tail=100" \
   -H "Authorization: Bearer <token>"
 ```
 
@@ -167,7 +178,7 @@ Query parameters:
 ### Stream Container Logs
 
 ```bash
-curl -X GET "http://localhost:8080/api/v1/containers/{containerId}/logs/stream?follow=true" \
+curl -X GET "http://localhost:9000/api/v1/containers/{containerId}/logs/stream?follow=true" \
   -H "Authorization: Bearer <token>" \
   -H "Accept: text/event-stream"
 ```
@@ -178,8 +189,8 @@ Query parameters:
 ### OpenAPI Documentation
 
 When running the application, the OpenAPI specification is available at:
-- Swagger UI: `http://localhost:8080/q/swagger-ui`
-- OpenAPI JSON: `http://localhost:8080/q/openapi`
+- Swagger UI: `http://localhost:9000/q/swagger-ui`
+- OpenAPI JSON: `http://localhost:9000/q/openapi`
 
 ## Authentication
 

@@ -98,9 +98,18 @@ jobs:
           distribution: ${{ env.JAVA_DISTRIBUTION }}
           cache: maven
 
+      - name: Cache OWASP Dependency Check data
+        uses: actions/cache@v4
+        with:
+          path: ~/.m2/repository/org/owasp/dependency-check-data
+          key: ${{ runner.os }}-owasp-dependency-check-${{ hashFiles('**/pom.xml') }}
+          restore-keys: |
+            ${{ runner.os }}-owasp-dependency-check-
+
       - name: OWASP Dependency Check
         run: |
           mvn org.owasp:dependency-check-maven:check -B \
+            -Dnvd.api.key=${{ secrets.NVD_API_KEY }} \
             -DfailBuildOnCVSS=9 \
             -DsuppressionFile=.github/owasp-suppressions.xml || true
 

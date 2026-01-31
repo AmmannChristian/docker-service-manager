@@ -1,6 +1,9 @@
+/* (C)2026 */
 package com.ammann.servicemanager.service;
 
+import com.ammann.servicemanager.config.ServiceBlacklistConfig;
 import com.ammann.servicemanager.dto.ContainerInfoDTO;
+import com.ammann.servicemanager.exception.ServiceBlacklistedException;
 import com.github.dockerjava.api.DockerClient;
 import com.github.dockerjava.api.async.ResultCallback;
 import com.github.dockerjava.api.command.InspectContainerResponse;
@@ -23,6 +26,8 @@ public class ContainerService {
 
     @Inject Logger logger;
 
+    @Inject ServiceBlacklistConfig blacklistConfig;
+
     public List<ContainerInfoDTO> listContainers(boolean showAll) {
         List<Container> containers = dockerClient.listContainersCmd().withShowAll(showAll).exec();
 
@@ -30,11 +35,13 @@ public class ContainerService {
     }
 
     public void restartContainer(String containerId) {
+        checkBlacklist(containerId);
         logger.infof("Restarting container: %s", containerId);
         dockerClient.restartContainerCmd(containerId).withTimeout(10).exec();
     }
 
     public void stopContainer(String containerId) {
+        checkBlacklist(containerId);
         logger.infof("Stopping container: %s", containerId);
         dockerClient.stopContainerCmd(containerId).withTimeout(10).exec();
     }
@@ -46,7 +53,8 @@ public class ContainerService {
 
     public boolean checkForUpdate(String imageName) {
         try {
-            List<Image> localImages = dockerClient.listImagesCmd().withImageNameFilter(imageName).exec();
+            List<Image> localImages =
+                    dockerClient.listImagesCmd().withImageNameFilter(imageName).exec();
 
             if (localImages.isEmpty()) {
                 return false;
@@ -54,11 +62,13 @@ public class ContainerService {
 
             String localImageId = localImages.getFirst().getId();
 
-            dockerClient.pullImageCmd(imageName)
+            dockerClient
+                    .pullImageCmd(imageName)
                     .exec(new PullImageResultCallback())
                     .awaitCompletion();
 
-            List<Image> updatedImages = dockerClient.listImagesCmd().withImageNameFilter(imageName).exec();
+            List<Image> updatedImages =
+                    dockerClient.listImagesCmd().withImageNameFilter(imageName).exec();
 
             if (!updatedImages.isEmpty()) {
                 String newImageId = updatedImages.getFirst().getId();
@@ -74,6 +84,7 @@ public class ContainerService {
     }
 
     public void updateContainer(String containerId) {
+        checkBlacklist(containerId);
         InspectContainerResponse containerInfo =
                 dockerClient.inspectContainerCmd(containerId).exec();
         String imageName = containerInfo.getConfig().getImage();
@@ -81,7 +92,8 @@ public class ContainerService {
         logger.infof("Updating container %s with image %s", containerId, imageName);
 
         try {
-            dockerClient.pullImageCmd(imageName)
+            dockerClient
+                    .pullImageCmd(imageName)
                     .exec(new PullImageResultCallback())
                     .awaitCompletion();
 
@@ -89,15 +101,14 @@ public class ContainerService {
 
             dockerClient.removeContainerCmd(containerId).exec();
 
-            String newContainerId = dockerClient.createContainerCmd(imageName)
-                            .withName(containerInfo.getName().substring(1)) // Remove leading /
+            String newContainerId =
+                    dockerClient
+                            .createContainerCmd(imageName)
+                            .withName(containerInfo.getName().substring(1))
                             .withEnv(containerInfo.getConfig().getEnv())
-                            // TODO: Ports, Volumes, Networks übernehmen für vollständige
-                            // Konfiguration
                             .exec()
                             .getId();
 
-            // Starte den neu erstellten Container
             startContainer(newContainerId);
             logger.infof(
                     "Container %s successfully updated and started as %s",
@@ -116,6 +127,19 @@ public class ContainerService {
                 container.getImage(),
                 container.getState(),
                 container.getStatus());
+    }
+
+    private void checkBlacklist(String containerId) {
+        InspectContainerResponse info = dockerClient.inspectContainerCmd(containerId).exec();
+        String name = info.getName();
+        if (name.startsWith("/")) {
+            name = name.substring(1);
+        }
+        String image = info.getConfig().getImage();
+
+        if (blacklistConfig.isBlacklisted(containerId, name, image)) {
+            throw new ServiceBlacklistedException(containerId);
+        }
     }
 
     public Multi<String> streamContainerLogs(String containerId, boolean follow) {
@@ -146,14 +170,16 @@ public class ContainerService {
                 };
 
         try {
-            dockerClient.logContainerCmd(containerId)
+            dockerClient
+                    .logContainerCmd(containerId)
                     .withStdOut(true)
                     .withStdErr(true)
                     .withFollowStream(follow)
                     .withTimestamps(true)
                     .exec(callback);
 
-            return processor.onTermination()
+            return processor
+                    .onTermination()
                     .invoke(
                             () -> {
                                 try {
@@ -179,7 +205,8 @@ public class ContainerService {
         try {
             StringBuilder logs = new StringBuilder();
 
-            ResultCallback.Adapter<Frame> cb = new ResultCallback.Adapter<>() {
+            ResultCallback.Adapter<Frame> cb =
+                    new ResultCallback.Adapter<>() {
                         @Override
                         public void onNext(Frame frame) {
                             logs.append(new String(frame.getPayload()));
@@ -193,7 +220,8 @@ public class ContainerService {
                         }
                     };
 
-            dockerClient.logContainerCmd(containerId)
+            dockerClient
+                    .logContainerCmd(containerId)
                     .withStdOut(true)
                     .withStdErr(true)
                     .withTail(tailLines)

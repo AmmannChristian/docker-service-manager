@@ -4,6 +4,7 @@ package com.ammann.servicemanager.service;
 import static org.mockito.Mockito.*;
 
 import com.ammann.servicemanager.dto.ContainerInfoDTO;
+import java.lang.reflect.Field;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
@@ -26,13 +27,12 @@ class ContainerMonitorServiceTest {
         containerService = mock(ContainerService.class);
         logger = mock(Logger.class);
 
-        java.lang.reflect.Field containerServiceField =
+        Field containerServiceField =
                 ContainerMonitorService.class.getDeclaredField("containerService");
         containerServiceField.setAccessible(true);
         containerServiceField.set(monitorService, containerService);
 
-        java.lang.reflect.Field loggerField =
-                ContainerMonitorService.class.getDeclaredField("logger");
+        Field loggerField = ContainerMonitorService.class.getDeclaredField("logger");
         loggerField.setAccessible(true);
         loggerField.set(monitorService, logger);
     }

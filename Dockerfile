@@ -51,19 +51,24 @@ COPY --from=maven-base /root/.m2 /root/.m2
 COPY src ./src
 
 # Expose ports
-# 9000: HTTP/gRPC shared port
+# 9080: HTTP port
+# 9443: HTTPS port
+# 9090: Management port (health checks)
 # 5005: Debug port
-EXPOSE 9000 5005
+EXPOSE 9080 9443 9090 5005
 
 # Environment variables for dev mode
-ENV QUARKUS_HTTP_PORT=9000 \
+ENV QUARKUS_HTTP_PORT=9080 \
+    QUARKUS_HTTP_SSL_PORT=9443 \
+    QUARKUS_MANAGEMENT_ENABLED=true \
+    QUARKUS_MANAGEMENT_PORT=9090 \
     QUARKUS_HTTP_HOST=0.0.0.0 \
     JAVA_ENABLE_DEBUG=true \
     JAVA_DEBUG_PORT=*:5005
 
-# Health check
+# Health check (uses management port)
 HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
-  CMD curl -f http://localhost:9000/q/health/live || exit 1
+  CMD curl -f http://localhost:9090/q/health/live || exit 1
 
 # Run Quarkus in dev mode with hot reload
 ENTRYPOINT ["./mvnw", "quarkus:dev", "-Dquarkus.http.host=0.0.0.0", "-Ddebug=5005", "-DdebugHost=0.0.0.0"]
@@ -90,20 +95,27 @@ RUN find /deployments -mindepth 1 -exec chmod u=rwX,go= {} \;
 # Switch to non-root user for security
 USER 185
 
-# Expose port
-EXPOSE 9000
+# Expose ports
+# 9080: HTTP port
+# 9443: HTTPS port
+# 9090: Management port (health checks)
+EXPOSE 9080 9443 9090
 
 # Environment variables for production
 ENV LANGUAGE='en_US:en' \
+    QUARKUS_HTTP_PORT=9080 \
+    QUARKUS_HTTP_SSL_PORT=9443 \
+    QUARKUS_MANAGEMENT_ENABLED=true \
+    QUARKUS_MANAGEMENT_PORT=9090 \
     JAVA_OPTS_APPEND="-Dquarkus.http.host=0.0.0.0 -Djava.util.logging.manager=org.jboss.logmanager.LogManager" \
     JAVA_APP_JAR="quarkus-run.jar" \
     JAVA_MAX_MEM_RATIO=75 \
     JAVA_INITIAL_MEM_RATIO=50 \
     GC_CONTAINER_OPTIONS="-XX:+UseG1GC -XX:MaxGCPauseMillis=200"
 
-# Health check
+# Health check (uses management port)
 HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
-  CMD curl -f http://localhost:9000/q/health/live || exit 1
+  CMD curl -f http://localhost:9090/q/health/live || exit 1
 
 # Run application using optimized run-java script
 ENTRYPOINT ["/opt/jboss/container/java/run/run-java.sh"]
@@ -152,16 +164,22 @@ RUN chmod -R u=rwX,go= /work
 # Switch to non-root user
 USER 1001
 
-# Expose port
-EXPOSE 9000
+# Expose ports
+# 9080: HTTP port
+# 9443: HTTPS port
+# 9090: Management port (health checks)
+EXPOSE 9080 9443 9090
 
 # Environment variables
 ENV QUARKUS_HTTP_HOST=0.0.0.0 \
-    QUARKUS_HTTP_PORT=9000
+    QUARKUS_HTTP_PORT=9080 \
+    QUARKUS_HTTP_SSL_PORT=9443 \
+    QUARKUS_MANAGEMENT_ENABLED=true \
+    QUARKUS_MANAGEMENT_PORT=9090
 
-# Health check
+# Health check (uses management port)
 HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
-  CMD curl -f http://localhost:9000/q/health/live || exit 1
+  CMD curl -f http://localhost:9090/q/health/live || exit 1
 
 # Run native executable
 ENTRYPOINT ["./application"]

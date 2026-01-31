@@ -2,19 +2,26 @@
 package com.ammann.servicemanager.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
+import com.ammann.servicemanager.config.ServiceBlacklistConfig;
 import com.ammann.servicemanager.dto.ContainerInfoDTO;
+import com.ammann.servicemanager.exception.ServiceBlacklistedException;
 import com.github.dockerjava.api.DockerClient;
 import com.github.dockerjava.api.async.ResultCallback;
 import com.github.dockerjava.api.command.*;
-import com.github.dockerjava.api.model.*;
+import com.github.dockerjava.api.model.Container;
+import com.github.dockerjava.api.model.ContainerConfig;
+import com.github.dockerjava.api.model.Frame;
+import com.github.dockerjava.api.model.Image;
 import io.smallrye.mutiny.Multi;
 import io.smallrye.mutiny.helpers.test.AssertSubscriber;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
+import java.util.Optional;
 import org.jboss.logging.Logger;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -27,12 +34,19 @@ class ContainerServiceTest {
     ContainerService containerService;
     DockerClient dockerClient;
     Logger logger;
+    ServiceBlacklistConfig blacklistConfig;
 
     @BeforeEach
     void setUp() throws Exception {
         containerService = new ContainerService();
         dockerClient = mock(DockerClient.class);
         logger = mock(Logger.class);
+        blacklistConfig = mock(ServiceBlacklistConfig.class);
+
+        // Default: empty blacklist
+        when(blacklistConfig.blacklist()).thenReturn(Optional.empty());
+        when(blacklistConfig.isBlacklisted(anyString(), anyString(), anyString()))
+                .thenReturn(false);
 
         // Inject mocks using reflection
         java.lang.reflect.Field dockerClientField =
@@ -43,6 +57,23 @@ class ContainerServiceTest {
         java.lang.reflect.Field loggerField = ContainerService.class.getDeclaredField("logger");
         loggerField.setAccessible(true);
         loggerField.set(containerService, logger);
+
+        java.lang.reflect.Field blacklistField =
+                ContainerService.class.getDeclaredField("blacklistConfig");
+        blacklistField.setAccessible(true);
+        blacklistField.set(containerService, blacklistConfig);
+    }
+
+    private void setupInspectForBlacklistCheck(
+            String containerId, String containerName, String imageName) {
+        InspectContainerCmd inspectCmd = mock(InspectContainerCmd.class);
+        InspectContainerResponse inspectResponse = mock(InspectContainerResponse.class);
+        ContainerConfig config = mock(ContainerConfig.class);
+        when(dockerClient.inspectContainerCmd(containerId)).thenReturn(inspectCmd);
+        when(inspectCmd.exec()).thenReturn(inspectResponse);
+        when(inspectResponse.getName()).thenReturn("/" + containerName);
+        when(inspectResponse.getConfig()).thenReturn(config);
+        when(config.getImage()).thenReturn(imageName);
     }
 
     @Nested
@@ -81,11 +112,11 @@ class ContainerServiceTest {
             List<ContainerInfoDTO> result = containerService.listContainers(true);
 
             assertThat(result).hasSize(2);
-            assertThat(result.get(0).id()).isEqualTo("id1");
-            assertThat(result.get(0).name()).isEqualTo("/container1");
-            assertThat(result.get(0).image()).isEqualTo("nginx:latest");
-            assertThat(result.get(0).state()).isEqualTo("running");
-            assertThat(result.get(0).status()).isEqualTo("Up 5 hours");
+            assertThat(result.getFirst().id()).isEqualTo("id1");
+            assertThat(result.getFirst().name()).isEqualTo("/container1");
+            assertThat(result.getFirst().image()).isEqualTo("nginx:latest");
+            assertThat(result.getFirst().state()).isEqualTo("running");
+            assertThat(result.getFirst().status()).isEqualTo("Up 5 hours");
 
             assertThat(result.get(1).id()).isEqualTo("id2");
             assertThat(result.get(1).state()).isEqualTo("exited");
@@ -101,6 +132,7 @@ class ContainerServiceTest {
         @Test
         @DisplayName("should restart container with timeout")
         void shouldRestartContainerWithTimeout() {
+            setupInspectForBlacklistCheck("test-container-id", "test-container", "nginx:latest");
             RestartContainerCmd restartCmd = mock(RestartContainerCmd.class);
             when(dockerClient.restartContainerCmd(anyString())).thenReturn(restartCmd);
             when(restartCmd.withTimeout(anyInt())).thenReturn(restartCmd);
@@ -111,6 +143,21 @@ class ContainerServiceTest {
             verify(restartCmd).withTimeout(10);
             verify(restartCmd).exec();
         }
+
+        @Test
+        @DisplayName("should throw exception when container is blacklisted")
+        void shouldThrowExceptionWhenBlacklisted() {
+            String containerId = "protected-container-id";
+            setupInspectForBlacklistCheck(containerId, "traefik", "traefik:v3.1");
+            when(blacklistConfig.isBlacklisted(containerId, "traefik", "traefik:v3.1"))
+                    .thenReturn(true);
+
+            assertThatThrownBy(() -> containerService.restartContainer(containerId))
+                    .isInstanceOf(ServiceBlacklistedException.class)
+                    .hasMessageContaining(containerId);
+
+            verify(dockerClient, never()).restartContainerCmd(anyString());
+        }
     }
 
     @Nested
@@ -120,6 +167,7 @@ class ContainerServiceTest {
         @Test
         @DisplayName("should stop container with timeout")
         void shouldStopContainerWithTimeout() {
+            setupInspectForBlacklistCheck("test-container-id", "test-container", "nginx:latest");
             StopContainerCmd stopCmd = mock(StopContainerCmd.class);
             when(dockerClient.stopContainerCmd(anyString())).thenReturn(stopCmd);
             when(stopCmd.withTimeout(anyInt())).thenReturn(stopCmd);
@@ -129,6 +177,23 @@ class ContainerServiceTest {
             verify(dockerClient).stopContainerCmd("test-container-id");
             verify(stopCmd).withTimeout(10);
             verify(stopCmd).exec();
+        }
+
+        @Test
+        @DisplayName("should throw exception when container is blacklisted")
+        void shouldThrowExceptionWhenBlacklisted() {
+            String containerId = "protected-container-id";
+            setupInspectForBlacklistCheck(
+                    containerId, "docker-proxy", "tecnativa/docker-socket-proxy:latest");
+            when(blacklistConfig.isBlacklisted(
+                            containerId, "docker-proxy", "tecnativa/docker-socket-proxy:latest"))
+                    .thenReturn(true);
+
+            assertThatThrownBy(() -> containerService.stopContainer(containerId))
+                    .isInstanceOf(ServiceBlacklistedException.class)
+                    .hasMessageContaining(containerId);
+
+            verify(dockerClient, never()).stopContainerCmd(anyString());
         }
     }
 
@@ -238,7 +303,8 @@ class ContainerServiceTest {
             assertThat(result).isFalse();
             assertThat(Thread.currentThread().isInterrupted()).isTrue();
             // Clear interrupt status for other tests
-            Thread.interrupted();
+            boolean isInterrupted = Thread.interrupted();
+            assertThat(isInterrupted).isTrue();
         }
     }
 
@@ -247,13 +313,28 @@ class ContainerServiceTest {
     class UpdateContainer {
 
         @Test
+        @DisplayName("should throw exception when container is blacklisted")
+        void shouldThrowExceptionWhenBlacklisted() {
+            String containerId = "protected-container-id";
+            setupInspectForBlacklistCheck(containerId, "critical-service", "myapp:latest");
+            when(blacklistConfig.isBlacklisted(containerId, "critical-service", "myapp:latest"))
+                    .thenReturn(true);
+
+            assertThatThrownBy(() -> containerService.updateContainer(containerId))
+                    .isInstanceOf(ServiceBlacklistedException.class)
+                    .hasMessageContaining(containerId);
+
+            verify(dockerClient, never()).pullImageCmd(anyString());
+        }
+
+        @Test
         @DisplayName("should update container successfully")
         void shouldUpdateContainerSuccessfully() throws InterruptedException {
             String containerId = "old-container-id";
             String newContainerId = "new-container-id";
             String imageName = "nginx:latest";
 
-            // Mock inspect
+            // Mock inspect (called twice: once for blacklist check, once for update)
             InspectContainerCmd inspectCmd = mock(InspectContainerCmd.class);
             InspectContainerResponse inspectResponse = mock(InspectContainerResponse.class);
             ContainerConfig config = mock(ContainerConfig.class);
@@ -295,7 +376,7 @@ class ContainerServiceTest {
 
             containerService.updateContainer(containerId);
 
-            verify(dockerClient).inspectContainerCmd(containerId);
+            verify(dockerClient, atLeast(1)).inspectContainerCmd(containerId);
             verify(dockerClient).pullImageCmd(imageName);
             verify(dockerClient).stopContainerCmd(containerId);
             verify(dockerClient).removeContainerCmd(containerId);
@@ -316,6 +397,7 @@ class ContainerServiceTest {
             when(inspectCmd.exec()).thenReturn(inspectResponse);
             when(inspectResponse.getConfig()).thenReturn(config);
             when(config.getImage()).thenReturn(imageName);
+            when(inspectResponse.getName()).thenReturn("/test-container");
 
             PullImageCmd pullCmd = mock(PullImageCmd.class);
             PullImageResultCallback pullCallback = mock(PullImageResultCallback.class);
@@ -327,7 +409,8 @@ class ContainerServiceTest {
 
             assertThat(Thread.currentThread().isInterrupted()).isTrue();
             // Clear interrupt status
-            Thread.interrupted();
+            boolean isInterrupted = Thread.interrupted();
+            assertThat(isInterrupted).isTrue();
         }
     }
 
@@ -337,7 +420,7 @@ class ContainerServiceTest {
 
         @Test
         @DisplayName("should return container logs")
-        void shouldReturnContainerLogs() throws InterruptedException {
+        void shouldReturnContainerLogs() {
             String containerId = "test-container-id";
             String expectedLogs = "Log line 1\nLog line 2\n";
 
@@ -350,7 +433,6 @@ class ContainerServiceTest {
             // Simulate callback behavior
             doAnswer(
                             invocation -> {
-                                @SuppressWarnings("unchecked")
                                 ResultCallback.Adapter<Frame> callback = invocation.getArgument(0);
                                 Frame frame = mock(Frame.class);
                                 when(frame.getPayload()).thenReturn(expectedLogs.getBytes());
@@ -380,7 +462,6 @@ class ContainerServiceTest {
 
             doAnswer(
                             invocation -> {
-                                @SuppressWarnings("unchecked")
                                 ResultCallback.Adapter<Frame> callback = invocation.getArgument(0);
                                 Thread.currentThread().interrupt();
                                 throw new InterruptedException("Test");
@@ -392,7 +473,8 @@ class ContainerServiceTest {
 
             assertThat(result).isEqualTo("Error fetching logs");
             // Clear interrupt status
-            Thread.interrupted();
+            boolean isInterrupted = Thread.interrupted();
+            assertThat(isInterrupted).isTrue();
         }
     }
 
@@ -416,7 +498,6 @@ class ContainerServiceTest {
             final ResultCallback.Adapter<Frame>[] callbackHolder = new ResultCallback.Adapter[1];
             doAnswer(
                             invocation -> {
-                                @SuppressWarnings("unchecked")
                                 ResultCallback.Adapter<Frame> callback = invocation.getArgument(0);
                                 callbackHolder[0] = callback;
                                 // Simulate async: spawn thread to send data after small delay
@@ -468,7 +549,6 @@ class ContainerServiceTest {
             RuntimeException testException = new RuntimeException("Docker error");
             doAnswer(
                             invocation -> {
-                                @SuppressWarnings("unchecked")
                                 ResultCallback.Adapter<Frame> callback = invocation.getArgument(0);
                                 callback.onError(testException);
                                 return callback;

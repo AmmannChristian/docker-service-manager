@@ -87,8 +87,8 @@ class ContainerResourceTest {
             List<ContainerInfoDTO> result = resource.listContainers(false);
 
             assertThat(result).hasSize(2);
-            assertThat(result.get(0).id()).isEqualTo("abc123def456");
-            assertThat(result.get(0).name()).isEqualTo("nginx-proxy");
+            assertThat(result.getFirst().id()).isEqualTo("abc123def456");
+            assertThat(result.getFirst().name()).isEqualTo("nginx-proxy");
         }
 
         @Test

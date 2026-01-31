@@ -44,7 +44,7 @@ class ContainerInfoDTOTest {
         ContainerInfoDTO dto2 =
                 new ContainerInfoDTO("id1", "name1", "image1", "running", "status1");
 
-        assertThat(dto1.hashCode()).isEqualTo(dto2.hashCode());
+        assertThat(dto1.hashCode()).hasSameHashCodeAs(dto2);
     }
 
     @Test

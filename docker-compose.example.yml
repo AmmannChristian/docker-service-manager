@@ -107,6 +107,8 @@ services:
       # - HTTP_CORS_HEADERS=accept,authorization,content-type,x-requested-with
       # - HTTP_CORS_EXPOSED_HEADERS=content-disposition
       # - HTTP2_ENABLED=true
+      # Service Blacklist - comma-separated container IDs, names, or images
+      # - SERVICE_BLACKLIST=traefik,docker-socket-proxy-ro,docker-socket-proxy-rw
     depends_on:
       - docker-socket-proxy-rw
     networks:
@@ -116,7 +118,7 @@ services:
       - "traefik.http.routers.dsm-dev.rule=Host(`dsm.localhost`)"
       - "traefik.http.routers.dsm-dev.entrypoints=websecure"
       - "traefik.http.routers.dsm-dev.tls=true"
-      - "traefik.http.services.dsm-dev.loadbalancer.server.port=9000"
+      - "traefik.http.services.dsm-dev.loadbalancer.server.port=9080"
     restart: unless-stopped
 
   docker-service-manager:
@@ -135,6 +137,8 @@ services:
       # - HTTP_CORS_HEADERS=accept,authorization,content-type,x-requested-with
       # - HTTP_CORS_EXPOSED_HEADERS=content-disposition
       # - HTTP2_ENABLED=true
+      # Service Blacklist - comma-separated container IDs, names, or images
+      # - SERVICE_BLACKLIST=traefik,docker-socket-proxy-ro,docker-socket-proxy-rw
     depends_on:
       - docker-socket-proxy-rw
     read_only: true
@@ -152,7 +156,7 @@ services:
       - "traefik.http.routers.dsm.rule=Host(`dsm.example.com`)"
       - "traefik.http.routers.dsm.entrypoints=websecure"
       - "traefik.http.routers.dsm.tls.certresolver=letsencrypt"
-      - "traefik.http.services.dsm.loadbalancer.server.port=9000"
+      - "traefik.http.services.dsm.loadbalancer.server.port=9080"
     restart: unless-stopped
 
 networks:

@@ -25,10 +25,11 @@ A REST API for managing Docker containers, built with Quarkus. This service prov
 - Container lifecycle management (start, stop, restart, update)
 - Container listing with filtering options
 - Log retrieval and real-time log streaming via SSE
+- **Service blacklist** for protecting critical containers
 - OpenID Connect authentication with ZITADEL support
 - Role-based access control
 - OpenAPI documentation
-- Health checks for container orchestration
+- Health checks on dedicated management port
 - Multi-architecture Docker images (amd64, arm64)
 - Native executable support via GraalVM
 
@@ -56,7 +57,7 @@ cd docker-service-manager
 ./mvnw quarkus:dev
 ```
 
-The API will be available at `http://localhost:9000`. The Quarkus Dev UI is accessible at `http://localhost:9000/q/dev/`.
+The API will be available at `http://localhost:9080`. The Quarkus Dev UI is accessible at `http://localhost:9080/q/dev/`. Health checks are available on the management port at `http://localhost:9090/q/health`.
 
 ## Configuration
 
@@ -77,12 +78,24 @@ The API will be available at `http://localhost:9000`. The Quarkus Dev UI is acce
 
 | Variable | Description | Default |
 |----------|-------------|---------|
+| `HTTP_HOST` | Bind address | `0.0.0.0` |
+| `HTTP_PORT` | HTTP port | `9080` |
+| `HTTPS_PORT` | HTTPS port | `9443` |
+| `MANAGEMENT_PORT` | Management port (health checks) | `9090` |
 | `HTTP_CORS_ENABLED` | Enable CORS support | `true` |
 | `HTTP_CORS_ORIGINS` | Allowed CORS origins (regex) | `/.*/` |
 | `HTTP_CORS_METHODS` | Allowed HTTP methods | `GET,POST,PUT,DELETE,OPTIONS` |
 | `HTTP_CORS_HEADERS` | Allowed request headers | `accept,authorization,content-type,x-requested-with` |
 | `HTTP_CORS_EXPOSED_HEADERS` | Headers exposed to clients | `content-disposition` |
 | `HTTP2_ENABLED` | Enable HTTP/2 support | `true` |
+
+#### Service Protection
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `SERVICE_BLACKLIST` | Comma-separated list of protected containers (by ID, name, or image) | `` |
+
+The blacklist protects critical containers from being stopped, restarted, or updated via the API. Matching is performed against container ID, container name, and image name. Requests to modify blacklisted containers return HTTP 403 Forbidden.
 
 ### Example Configuration
 
@@ -93,6 +106,9 @@ export OIDC_AUTH_SERVER_URL=https://your-zitadel-instance.com
 export OIDC_CLIENT_ID=your-client-id
 export OIDC_JWT_KEY_FILE=/path/to/private-key.json
 export OIDC_JWT_KEY_ID=your-key-id
+
+# Optional: Protect critical infrastructure containers
+export SERVICE_BLACKLIST=traefik,docker-socket-proxy-ro,docker-socket-proxy-rw
 ```
 
 ### Docker Socket Access
@@ -128,7 +144,7 @@ All endpoints require authentication and the `ADMIN_ROLE` role.
 ### List Containers
 
 ```bash
-curl -X GET "http://localhost:9000/api/v1/containers?all=true" \
+curl -X GET "http://localhost:9080/api/v1/containers?all=true" \
   -H "Authorization: Bearer <token>"
 ```
 
@@ -138,21 +154,21 @@ Query parameters:
 ### Start Container
 
 ```bash
-curl -X POST "http://localhost:9000/api/v1/containers/{containerId}/start" \
+curl -X POST "http://localhost:9080/api/v1/containers/{containerId}/start" \
   -H "Authorization: Bearer <token>"
 ```
 
 ### Stop Container
 
 ```bash
-curl -X POST "http://localhost:9000/api/v1/containers/{containerId}/stop" \
+curl -X POST "http://localhost:9080/api/v1/containers/{containerId}/stop" \
   -H "Authorization: Bearer <token>"
 ```
 
 ### Restart Container
 
 ```bash
-curl -X POST "http://localhost:9000/api/v1/containers/{containerId}/restart" \
+curl -X POST "http://localhost:9080/api/v1/containers/{containerId}/restart" \
   -H "Authorization: Bearer <token>"
 ```
 
@@ -161,14 +177,14 @@ curl -X POST "http://localhost:9000/api/v1/containers/{containerId}/restart" \
 Pulls the latest version of the container image and recreates the container with the same configuration.
 
 ```bash
-curl -X POST "http://localhost:9000/api/v1/containers/{containerId}/update" \
+curl -X POST "http://localhost:9080/api/v1/containers/{containerId}/update" \
   -H "Authorization: Bearer <token>"
 ```
 
 ### Get Container Logs
 
 ```bash
-curl -X GET "http://localhost:9000/api/v1/containers/{containerId}/logs?tail=100" \
+curl -X GET "http://localhost:9080/api/v1/containers/{containerId}/logs?tail=100" \
   -H "Authorization: Bearer <token>"
 ```
 
@@ -178,7 +194,7 @@ Query parameters:
 ### Stream Container Logs
 
 ```bash
-curl -X GET "http://localhost:9000/api/v1/containers/{containerId}/logs/stream?follow=true" \
+curl -X GET "http://localhost:9080/api/v1/containers/{containerId}/logs/stream?follow=true" \
   -H "Authorization: Bearer <token>" \
   -H "Accept: text/event-stream"
 ```
@@ -189,8 +205,8 @@ Query parameters:
 ### OpenAPI Documentation
 
 When running the application, the OpenAPI specification is available at:
-- Swagger UI: `http://localhost:9000/q/swagger-ui`
-- OpenAPI JSON: `http://localhost:9000/q/openapi`
+- Swagger UI: `http://localhost:9080/q/swagger-ui`
+- OpenAPI JSON: `http://localhost:9080/q/openapi`
 
 ## Authentication
 
@@ -307,12 +323,14 @@ docker build --target prod-native -t docker-service-manager:native .
 ```bash
 docker run -d \
   --name docker-service-manager \
-  -p 9000:9000 \
+  -p 9080:9080 \
+  -p 9090:9090 \
   -v /var/run/docker.sock:/var/run/docker.sock \
   -e OIDC_AUTH_SERVER_URL=https://your-zitadel.com \
   -e OIDC_CLIENT_ID=your-client-id \
   -e OIDC_JWT_KEY_FILE=/keys/private-key.json \
   -e OIDC_JWT_KEY_ID=your-key-id \
+  -e SERVICE_BLACKLIST=traefik,docker-socket-proxy \
   -v /path/to/keys:/keys:ro \
   docker-service-manager:latest
 ```
@@ -326,7 +344,8 @@ services:
   docker-service-manager:
     image: ghcr.io/ammannchristian/docker-service-manager:latest
     ports:
-      - "9000:9000"
+      - "9080:9080"   # API port
+      - "9090:9090"   # Management port (health checks)
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - ./keys:/keys:ro
@@ -335,8 +354,9 @@ services:
       OIDC_CLIENT_ID: your-client-id
       OIDC_JWT_KEY_FILE: /keys/private-key.json
       OIDC_JWT_KEY_ID: your-key-id
+      SERVICE_BLACKLIST: traefik,docker-socket-proxy  # Protect critical containers
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:9000/q/health/live"]
+      test: ["CMD", "curl", "-f", "http://localhost:9090/q/health/live"]
       interval: 30s
       timeout: 10s
       retries: 3

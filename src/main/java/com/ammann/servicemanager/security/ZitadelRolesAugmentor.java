@@ -1,3 +1,4 @@
+/* (C)2026 */
 package com.ammann.servicemanager.security;
 
 import io.quarkus.oidc.TokenIntrospection;
@@ -7,7 +8,6 @@ import io.quarkus.security.identity.SecurityIdentityAugmentor;
 import io.quarkus.security.runtime.QuarkusSecurityIdentity;
 import io.smallrye.mutiny.Uni;
 import jakarta.enterprise.context.ApplicationScoped;
-import jakarta.inject.Inject;
 import java.util.HashSet;
 import java.util.Map;
 import java.util.Set;
@@ -37,6 +37,8 @@ import org.jboss.logging.Logger;
 @ApplicationScoped
 public class ZitadelRolesAugmentor implements SecurityIdentityAugmentor {
 
+    private static final Logger LOG = Logger.getLogger(ZitadelRolesAugmentor.class);
+
     /**
      * ZITADEL-specific claim path for project roles (generic format).
      * Must match: quarkus.oidc.roles.role-claim-path
@@ -54,8 +56,6 @@ public class ZitadelRolesAugmentor implements SecurityIdentityAugmentor {
      */
     private static final String SCOPE_CLAIM = "scope";
 
-    @Inject Logger logger;
-
     @Override
     public Uni<SecurityIdentity> augment(
             SecurityIdentity identity, AuthenticationRequestContext context) {
@@ -68,7 +68,7 @@ public class ZitadelRolesAugmentor implements SecurityIdentityAugmentor {
     private SecurityIdentity augmentBlocking(SecurityIdentity identity) {
         Set<String> extractedRoles = new HashSet<>();
 
-        logger.debugf(
+        LOG.debugf(
                 "Augmenting security identity for principal: %s, existing roles: %s, attributes:"
                         + " %s",
                 identity.getPrincipal().getName(),
@@ -89,14 +89,14 @@ public class ZitadelRolesAugmentor implements SecurityIdentityAugmentor {
 
         // If no roles extracted, return identity unchanged
         if (extractedRoles.isEmpty()) {
-            logger.warnf(
+            LOG.warnf(
                     "No ZITADEL roles found for principal: %s (existing roles: %s)",
                     identity.getPrincipal().getName(), identity.getRoles());
             return identity;
         }
 
         // Build new SecurityIdentity with extracted roles
-        logger.infof(
+        LOG.infof(
                 "Extracted %d ZITADEL roles for principal '%s': %s",
                 extractedRoles.size(), identity.getPrincipal().getName(), extractedRoles);
 
@@ -113,19 +113,15 @@ public class ZitadelRolesAugmentor implements SecurityIdentityAugmentor {
         Set<String> roles = new HashSet<>();
 
         try {
-            // ZITADEL project roles claim (generic)
-            roles.addAll(
-                    extractRolesFromClaim(jwt.getClaim(ZITADEL_ROLES_CLAIM), ZITADEL_ROLES_CLAIM));
-
-            // ZITADEL project roles claim (project-specific)
-            for (String claimName : jwt.getClaimNames()) {
-                if (claimName.startsWith(ZITADEL_PROJECT_ROLES_PREFIX)
-                        && claimName.endsWith(":roles")) {
-                    roles.addAll(extractRolesFromClaim(jwt.getClaim(claimName), claimName));
-                }
-            }
-
-            if (!roles.isEmpty()) {
+            // ZITADEL project roles claim (primary source)
+            Object rolesClaim = jwt.getClaim(ZITADEL_ROLES_CLAIM);
+            if (rolesClaim instanceof Map) {
+                @SuppressWarnings("unchecked")
+                Map<String, Object> rolesMap = (Map<String, Object>) rolesClaim;
+                roles.addAll(rolesMap.keySet());
+                LOG.debugf(
+                        "Extracted %d roles from JWT claim '%s': %s",
+                        roles.size(), ZITADEL_ROLES_CLAIM, roles);
                 return roles;
             }
 
@@ -133,8 +129,7 @@ public class ZitadelRolesAugmentor implements SecurityIdentityAugmentor {
             Set<String> groups = jwt.getGroups();
             if (groups != null && !groups.isEmpty()) {
                 roles.addAll(groups);
-                logger.debugf(
-                        "Extracted %d roles from JWT 'groups' claim: %s", roles.size(), roles);
+                LOG.debugf("Extracted %d roles from JWT 'groups' claim: %s", roles.size(), roles);
                 return roles;
             }
 
@@ -146,11 +141,11 @@ public class ZitadelRolesAugmentor implements SecurityIdentityAugmentor {
                         roles.add(s);
                     }
                 }
-                logger.debugf("Extracted %d roles from JWT 'scope' claim: %s", roles.size(), roles);
+                LOG.debugf("Extracted %d roles from JWT 'scope' claim: %s", roles.size(), roles);
             }
 
         } catch (Exception e) {
-            logger.warnf(e, "Failed to extract roles from JWT: %s", e.getMessage());
+            LOG.warnf(e, "Failed to extract roles from JWT: %s", e.getMessage());
         }
 
         return roles;
@@ -166,62 +161,67 @@ public class ZitadelRolesAugmentor implements SecurityIdentityAugmentor {
         Set<String> roles = new HashSet<>();
 
         try {
-            logger.debugf(
+            LOG.debugf(
                     "Introspection claims available: %s", introspection.getJsonObject().keySet());
 
             // Try generic ZITADEL project roles claim first
-            roles.addAll(
-                    extractRolesFromClaim(
-                            introspection.getJsonObject().get(ZITADEL_ROLES_CLAIM),
-                            ZITADEL_ROLES_CLAIM));
+            Object rolesClaim = introspection.getJsonObject().get(ZITADEL_ROLES_CLAIM);
+
+            LOG.debugf(
+                    "Generic roles claim (%s): %s (type: %s)",
+                    ZITADEL_ROLES_CLAIM,
+                    rolesClaim,
+                    rolesClaim != null ? rolesClaim.getClass().getName() : "null");
+
+            this.addRoles(roles, rolesClaim, ZITADEL_ROLES_CLAIM);
 
             // Try project-specific roles claims (with project ID in path)
             for (String key : introspection.getJsonObject().keySet()) {
-                logger.debugf("Checking key: %s", key);
-                if (key.startsWith(ZITADEL_PROJECT_ROLES_PREFIX) && key.endsWith(":roles")) {
-                    roles.addAll(
-                            extractRolesFromClaim(introspection.getJsonObject().get(key), key));
+                LOG.debugf("Checking key: %s", key);
+                if (!key.startsWith(ZITADEL_PROJECT_ROLES_PREFIX) && key.endsWith(":roles")) {
+                    continue;
                 }
-            }
 
-            if (!roles.isEmpty()) {
-                return roles;
+                Object projectRolesClaim = introspection.getJsonObject().get(key);
+                LOG.debugf(
+                        "Project-specific roles claim (%s): %s (type: %s)",
+                        key,
+                        projectRolesClaim,
+                        projectRolesClaim != null
+                                ? projectRolesClaim.getClass().getName()
+                                : "null");
+
+                this.addRoles(roles, projectRolesClaim, key);
             }
 
             // Fallback: scope claim (space-separated roles)
-            String scope = introspection.getString("scope");
+            String scope = introspection.getString(SCOPE_CLAIM);
             if (scope != null && !scope.isBlank()) {
                 for (String s : scope.split("\\s+")) {
                     if (!s.isBlank()) {
                         roles.add(s);
                     }
                 }
-                logger.debugf(
+                LOG.debugf(
                         "Extracted %d roles from introspection 'scope': %s", roles.size(), roles);
             }
 
         } catch (Exception e) {
-            logger.errorf(e, "Failed to extract roles from introspection: %s", e.getMessage());
+            LOG.errorf(e, "Failed to extract roles from introspection: %s", e.getMessage());
         }
 
         return roles;
     }
 
-    private Set<String> extractRolesFromClaim(Object claimValue, String claimName) {
-        Set<String> roles = new HashSet<>();
-
-        if (claimValue instanceof Map<?, ?> rolesMap) {
-            for (Object key : rolesMap.keySet()) {
-                if (key != null) {
-                    roles.add(key.toString());
-                }
-            }
+    private void addRoles(Set<String> roles, Object rolesClaim, String key) {
+        if (!(rolesClaim instanceof Map<?, ?> rawMap)) {
+            return;
         }
 
-        if (!roles.isEmpty()) {
-            logger.debugf("Extracted %d roles from claim '%s': %s", roles.size(), claimName, roles);
-        }
+        @SuppressWarnings("unchecked")
+        Map<String, Object> rolesMap = (Map<String, Object>) rawMap;
 
-        return roles;
+        roles.addAll(rolesMap.keySet());
+        LOG.infof("Extracted %d roles from introspection claim '%s': %s", roles.size(), key, roles);
     }
 }

@@ -6,16 +6,23 @@ import com.ammann.servicemanager.dto.ContainerInfoDTO;
 import com.ammann.servicemanager.exception.ServiceBlacklistedException;
 import com.github.dockerjava.api.DockerClient;
 import com.github.dockerjava.api.async.ResultCallback;
+import com.github.dockerjava.api.command.CreateContainerCmd;
 import com.github.dockerjava.api.command.InspectContainerResponse;
 import com.github.dockerjava.api.command.PullImageResultCallback;
+import com.github.dockerjava.api.exception.NotModifiedException;
 import com.github.dockerjava.api.model.Container;
+import com.github.dockerjava.api.model.ContainerNetwork;
 import com.github.dockerjava.api.model.Frame;
+import com.github.dockerjava.api.model.HostConfig;
 import com.github.dockerjava.api.model.Image;
+import com.github.dockerjava.api.model.NetworkSettings;
+import com.github.dockerjava.api.model.Volume;
 import io.smallrye.mutiny.Multi;
 import io.smallrye.mutiny.operators.multi.processors.BroadcastProcessor;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import java.io.IOException;
+import java.util.ArrayList;
 import java.util.List;
 import org.jboss.logging.Logger;
 
@@ -88,35 +95,123 @@ public class ContainerService {
         InspectContainerResponse containerInfo =
                 dockerClient.inspectContainerCmd(containerId).exec();
         String imageName = containerInfo.getConfig().getImage();
+        String containerName = containerInfo.getName().substring(1); // Remove leading "/"
 
-        logger.infof("Updating container %s with image %s", containerId, imageName);
+        logger.infof(
+                "Updating container %s (%s) with image %s", containerName, containerId, imageName);
 
         try {
+            // Pull latest image
+            logger.infof("Pulling latest image: %s", imageName);
             dockerClient
                     .pullImageCmd(imageName)
                     .exec(new PullImageResultCallback())
                     .awaitCompletion();
 
-            stopContainer(containerId);
+            // Stop container (ignore if already stopped)
+            try {
+                dockerClient.stopContainerCmd(containerId).withTimeout(30).exec();
+                logger.infof("Container %s stopped", containerName);
+            } catch (NotModifiedException e) {
+                logger.infof("Container %s was already stopped", containerName);
+            }
 
-            dockerClient.removeContainerCmd(containerId).exec();
+            // Capture network connections before removal
+            List<String> connectedNetworks = new ArrayList<>();
+            NetworkSettings networkSettings = containerInfo.getNetworkSettings();
+            if (networkSettings != null && networkSettings.getNetworks() != null) {
+                connectedNetworks.addAll(networkSettings.getNetworks().keySet());
+            }
 
-            String newContainerId =
-                    dockerClient
-                            .createContainerCmd(imageName)
-                            .withName(containerInfo.getName().substring(1))
-                            .withEnv(containerInfo.getConfig().getEnv())
-                            .exec()
-                            .getId();
+            // Remove old container
+            dockerClient.removeContainerCmd(containerId).withForce(true).exec();
+            logger.infof("Container %s removed", containerName);
 
+            // Create new container with preserved configuration
+            CreateContainerCmd createCmd =
+                    dockerClient.createContainerCmd(imageName).withName(containerName);
+
+            // Preserve container config
+            if (containerInfo.getConfig() != null) {
+                var config = containerInfo.getConfig();
+                if (config.getEnv() != null) {
+                    createCmd.withEnv(config.getEnv());
+                }
+                if (config.getLabels() != null) {
+                    createCmd.withLabels(config.getLabels());
+                }
+                if (config.getExposedPorts() != null) {
+                    createCmd.withExposedPorts(config.getExposedPorts());
+                }
+                if (config.getCmd() != null) {
+                    createCmd.withCmd(config.getCmd());
+                }
+                if (config.getEntrypoint() != null) {
+                    createCmd.withEntrypoint(config.getEntrypoint());
+                }
+                if (config.getWorkingDir() != null) {
+                    createCmd.withWorkingDir(config.getWorkingDir());
+                }
+                if (config.getUser() != null && !config.getUser().isEmpty()) {
+                    createCmd.withUser(config.getUser());
+                }
+                if (config.getVolumes() != null && !config.getVolumes().isEmpty()) {
+                    createCmd.withVolumes(config.getVolumes().keySet().toArray(new Volume[0]));
+                }
+                if (config.getHealthcheck() != null) {
+                    createCmd.withHealthcheck(config.getHealthcheck());
+                }
+            }
+
+            // Preserve host config (volumes, ports, network mode, restart policy, etc.)
+            if (containerInfo.getHostConfig() != null) {
+                HostConfig hostConfig = containerInfo.getHostConfig();
+                createCmd.withHostConfig(hostConfig);
+            }
+
+            String newContainerId = createCmd.exec().getId();
+            logger.infof("Container %s created with new ID: %s", containerName, newContainerId);
+
+            // Connect to additional networks (HostConfig only handles the primary network)
+            for (String networkName : connectedNetworks) {
+                // Skip the default bridge network if using a custom network mode
+                if ("bridge".equals(networkName) && connectedNetworks.size() > 1) {
+                    continue;
+                }
+                try {
+                    // Get network aliases from original container
+                    ContainerNetwork originalNetwork =
+                            networkSettings.getNetworks().get(networkName);
+                    var connectCmd =
+                            dockerClient
+                                    .connectToNetworkCmd()
+                                    .withContainerId(newContainerId)
+                                    .withNetworkId(networkName);
+
+                    if (originalNetwork != null && originalNetwork.getAliases() != null) {
+                        connectCmd.withContainerNetwork(
+                                new ContainerNetwork().withAliases(originalNetwork.getAliases()));
+                    }
+                    connectCmd.exec();
+                    logger.debugf("Connected container to network: %s", networkName);
+                } catch (Exception e) {
+                    logger.debugf(
+                            "Network %s may already be connected or is primary: %s",
+                            networkName, e.getMessage());
+                }
+            }
+
+            // Start the new container
             startContainer(newContainerId);
-            logger.infof(
-                    "Container %s successfully updated and started as %s",
-                    containerId, newContainerId);
+            logger.infof("Container %s successfully updated and started", containerName);
 
         } catch (InterruptedException e) {
-            logger.errorf(e, "Error updating container: %s", containerId);
+            logger.errorf(e, "Error updating container: %s", containerName);
             Thread.currentThread().interrupt();
+            throw new RuntimeException("Container update interrupted", e);
+        } catch (Exception e) {
+            logger.errorf(e, "Error updating container: %s", containerName);
+            throw new RuntimeException("Failed to update container: " + containerName, e);
         }
     }
 

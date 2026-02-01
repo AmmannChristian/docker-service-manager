@@ -32,11 +32,6 @@ class ZitadelRolesAugmentorTest {
         augmentor = new ZitadelRolesAugmentor();
         context = mock(AuthenticationRequestContext.class);
         logger = mock(Logger.class);
-
-        java.lang.reflect.Field loggerField =
-                ZitadelRolesAugmentor.class.getDeclaredField("logger");
-        loggerField.setAccessible(true);
-        loggerField.set(augmentor, logger);
     }
 
     @Nested

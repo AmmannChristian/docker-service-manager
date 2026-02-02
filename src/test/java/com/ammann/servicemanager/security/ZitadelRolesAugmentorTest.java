@@ -60,27 +60,6 @@ class ZitadelRolesAugmentorTest {
         }
 
         @Test
-        @DisplayName("should extract roles from project-specific claim")
-        void shouldExtractRolesFromProjectSpecificClaim() {
-            JsonWebToken jwt = mock(JsonWebToken.class);
-            when(jwt.getName()).thenReturn("test-user");
-            when(jwt.getClaimNames()).thenReturn(Set.of("urn:zitadel:iam:org:project:12345:roles"));
-
-            Map<String, Object> rolesMap = new HashMap<>();
-            rolesMap.put("PROJECT_ADMIN", Map.of("orgId", "123"));
-
-            when(jwt.getClaim("urn:zitadel:iam:org:project:roles")).thenReturn(null);
-            when(jwt.getClaim("urn:zitadel:iam:org:project:12345:roles")).thenReturn(rolesMap);
-
-            SecurityIdentity identity = createIdentityWithJwt(jwt);
-
-            Uni<SecurityIdentity> result = augmentor.augment(identity, context);
-            SecurityIdentity augmented = result.await().indefinitely();
-
-            assertThat(augmented.getRoles()).contains("PROJECT_ADMIN");
-        }
-
-        @Test
         @DisplayName("should fallback to groups claim when ZITADEL claim not found")
         void shouldFallbackToGroupsClaim() {
             JsonWebToken jwt = mock(JsonWebToken.class);
@@ -120,7 +99,8 @@ class ZitadelRolesAugmentorTest {
         void shouldHandleExceptionDuringRoleExtraction() {
             JsonWebToken jwt = mock(JsonWebToken.class);
             when(jwt.getName()).thenReturn("test-user");
-            when(jwt.getClaimNames()).thenThrow(new RuntimeException("Token parsing error"));
+            when(jwt.getClaim("urn:zitadel:iam:org:project:roles"))
+                    .thenThrow(new RuntimeException("Token parsing error"));
 
             SecurityIdentity identity = createIdentityWithJwt(jwt);
 
@@ -128,7 +108,7 @@ class ZitadelRolesAugmentorTest {
             SecurityIdentity augmented = result.await().indefinitely();
 
             // Should return original identity when extraction fails
-            assertThat(augmented).isNotNull();
+            assertThat(augmented).isSameAs(identity);
         }
 
         @Test
@@ -288,28 +268,6 @@ class ZitadelRolesAugmentorTest {
     @Nested
     @DisplayName("Edge Cases")
     class EdgeCases {
-
-        @Test
-        @DisplayName("should handle null key in roles map")
-        void shouldHandleNullKeyInRolesMap() {
-            JsonWebToken jwt = mock(JsonWebToken.class);
-            when(jwt.getName()).thenReturn("test-user");
-            when(jwt.getClaimNames()).thenReturn(Set.of("urn:zitadel:iam:org:project:roles"));
-
-            Map<String, Object> rolesMap = new HashMap<>();
-            rolesMap.put("VALID_ROLE", Map.of("orgId", "123"));
-            rolesMap.put(null, Map.of("orgId", "456"));
-
-            when(jwt.getClaim("urn:zitadel:iam:org:project:roles")).thenReturn(rolesMap);
-
-            SecurityIdentity identity = createIdentityWithJwt(jwt);
-
-            Uni<SecurityIdentity> result = augmentor.augment(identity, context);
-            SecurityIdentity augmented = result.await().indefinitely();
-
-            assertThat(augmented.getRoles()).contains("VALID_ROLE");
-            assertThat(augmented.getRoles()).doesNotContain((String) null);
-        }
 
         @Test
         @DisplayName("should handle empty scope string")

@@ -12,21 +12,31 @@ import com.ammann.servicemanager.exception.ServiceBlacklistedException;
 import com.github.dockerjava.api.DockerClient;
 import com.github.dockerjava.api.async.ResultCallback;
 import com.github.dockerjava.api.command.*;
+import com.github.dockerjava.api.exception.NotModifiedException;
 import com.github.dockerjava.api.model.Container;
 import com.github.dockerjava.api.model.ContainerConfig;
+import com.github.dockerjava.api.model.ContainerNetwork;
+import com.github.dockerjava.api.model.ExposedPort;
 import com.github.dockerjava.api.model.Frame;
+import com.github.dockerjava.api.model.HealthCheck;
+import com.github.dockerjava.api.model.HostConfig;
 import com.github.dockerjava.api.model.Image;
+import com.github.dockerjava.api.model.NetworkSettings;
+import com.github.dockerjava.api.model.Volume;
 import io.smallrye.mutiny.Multi;
 import io.smallrye.mutiny.helpers.test.AssertSubscriber;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import org.jboss.logging.Logger;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 
 @DisplayName("ContainerService")
 class ContainerServiceTest {
@@ -338,12 +348,39 @@ class ContainerServiceTest {
             InspectContainerCmd inspectCmd = mock(InspectContainerCmd.class);
             InspectContainerResponse inspectResponse = mock(InspectContainerResponse.class);
             ContainerConfig config = mock(ContainerConfig.class);
+            HostConfig hostConfig = HostConfig.newHostConfig().withNetworkMode("bridge");
+            NetworkSettings networkSettings = mock(NetworkSettings.class);
+            Map<String, ContainerNetwork> networks = new HashMap<>();
+            networks.put("bridge", new ContainerNetwork());
+            networks.put("custom-net", new ContainerNetwork().withAliases(List.of("custom-alias")));
+            Map<String, String> labels = Map.of("com.example.label", "value");
+            ExposedPort[] exposedPorts = new ExposedPort[] {ExposedPort.tcp(8080)};
+            String[] cmd = new String[] {"echo", "hello"};
+            String[] entrypoint = new String[] {"/bin/sh", "-c"};
+            String workingDir = "/opt/app";
+            String user = "1000:1000";
+            HealthCheck healthCheck =
+                    new HealthCheck().withTest(List.of("CMD-SHELL", "curl -f http://localhost"));
+            Volume volume = new Volume("/data");
+            Map volumes = buildVolumesMap(volume);
+
             when(dockerClient.inspectContainerCmd(containerId)).thenReturn(inspectCmd);
             when(inspectCmd.exec()).thenReturn(inspectResponse);
             when(inspectResponse.getConfig()).thenReturn(config);
+            when(inspectResponse.getHostConfig()).thenReturn(hostConfig);
+            when(inspectResponse.getNetworkSettings()).thenReturn(networkSettings);
+            when(networkSettings.getNetworks()).thenReturn(networks);
             when(config.getImage()).thenReturn(imageName);
             when(inspectResponse.getName()).thenReturn("/test-container");
             when(config.getEnv()).thenReturn(new String[] {"ENV=test"});
+            when(config.getLabels()).thenReturn(labels);
+            when(config.getExposedPorts()).thenReturn(exposedPorts);
+            when(config.getCmd()).thenReturn(cmd);
+            when(config.getEntrypoint()).thenReturn(entrypoint);
+            when(config.getWorkingDir()).thenReturn(workingDir);
+            when(config.getUser()).thenReturn(user);
+            doReturn(volumes).when(config).getVolumes();
+            when(config.getHealthcheck()).thenReturn(healthCheck);
 
             // Mock pull
             PullImageCmd pullCmd = mock(PullImageCmd.class);
@@ -360,6 +397,7 @@ class ContainerServiceTest {
             // Mock remove
             RemoveContainerCmd removeCmd = mock(RemoveContainerCmd.class);
             when(dockerClient.removeContainerCmd(containerId)).thenReturn(removeCmd);
+            when(removeCmd.withForce(true)).thenReturn(removeCmd);
 
             // Mock create
             CreateContainerCmd createCmd = mock(CreateContainerCmd.class);
@@ -370,6 +408,14 @@ class ContainerServiceTest {
             when(createCmd.exec()).thenReturn(createResponse);
             when(createResponse.getId()).thenReturn(newContainerId);
 
+            // Mock network connect
+            ConnectToNetworkCmd connectCmd = mock(ConnectToNetworkCmd.class);
+            when(dockerClient.connectToNetworkCmd()).thenReturn(connectCmd);
+            when(connectCmd.withContainerId(newContainerId)).thenReturn(connectCmd);
+            when(connectCmd.withNetworkId(anyString())).thenReturn(connectCmd);
+            when(connectCmd.withContainerNetwork(any(ContainerNetwork.class)))
+                    .thenReturn(connectCmd);
+
             // Mock start
             StartContainerCmd startCmd = mock(StartContainerCmd.class);
             when(dockerClient.startContainerCmd(newContainerId)).thenReturn(startCmd);
@@ -379,8 +425,25 @@ class ContainerServiceTest {
             verify(dockerClient, atLeast(1)).inspectContainerCmd(containerId);
             verify(dockerClient).pullImageCmd(imageName);
             verify(dockerClient).stopContainerCmd(containerId);
+            verify(stopCmd).withTimeout(30);
             verify(dockerClient).removeContainerCmd(containerId);
+            verify(removeCmd).withForce(true);
             verify(dockerClient).createContainerCmd(imageName);
+            verify(createCmd).withHostConfig(hostConfig);
+            verify(createCmd).withLabels(labels);
+            verify(createCmd).withExposedPorts(exposedPorts);
+            verify(createCmd).withCmd(cmd);
+            verify(createCmd).withEntrypoint(entrypoint);
+            verify(createCmd).withWorkingDir(workingDir);
+            verify(createCmd).withUser(user);
+            ArgumentCaptor<Volume[]> volumesCaptor = ArgumentCaptor.forClass(Volume[].class);
+            verify(createCmd).withVolumes(volumesCaptor.capture());
+            assertThat(volumesCaptor.getValue()).containsExactly(volume);
+            verify(createCmd).withHealthcheck(healthCheck);
+            verify(dockerClient).connectToNetworkCmd();
+            verify(connectCmd).withContainerId(newContainerId);
+            verify(connectCmd).withNetworkId("custom-net");
+            verify(connectCmd).withContainerNetwork(any(ContainerNetwork.class));
             verify(dockerClient).startContainerCmd(newContainerId);
         }
 
@@ -405,13 +468,70 @@ class ContainerServiceTest {
             when(pullCmd.exec(any(PullImageResultCallback.class))).thenReturn(pullCallback);
             when(pullCallback.awaitCompletion()).thenThrow(new InterruptedException("Test"));
 
-            containerService.updateContainer(containerId);
+            assertThatThrownBy(() -> containerService.updateContainer(containerId))
+                    .isInstanceOf(RuntimeException.class)
+                    .hasMessageContaining("Container update interrupted");
 
             assertThat(Thread.currentThread().isInterrupted()).isTrue();
             // Clear interrupt status
             boolean isInterrupted = Thread.interrupted();
             assertThat(isInterrupted).isTrue();
         }
+
+        @Test
+        @DisplayName("should continue update when container is already stopped")
+        void shouldContinueUpdateWhenContainerAlreadyStopped() throws InterruptedException {
+            String containerId = "stopped-container-id";
+            String newContainerId = "new-container-id";
+            String imageName = "nginx:latest";
+
+            InspectContainerCmd inspectCmd = mock(InspectContainerCmd.class);
+            InspectContainerResponse inspectResponse = mock(InspectContainerResponse.class);
+            ContainerConfig config = mock(ContainerConfig.class);
+            when(dockerClient.inspectContainerCmd(containerId)).thenReturn(inspectCmd);
+            when(inspectCmd.exec()).thenReturn(inspectResponse);
+            when(inspectResponse.getConfig()).thenReturn(config);
+            when(config.getImage()).thenReturn(imageName);
+            when(inspectResponse.getName()).thenReturn("/test-container");
+
+            PullImageCmd pullCmd = mock(PullImageCmd.class);
+            PullImageResultCallback pullCallback = mock(PullImageResultCallback.class);
+            when(dockerClient.pullImageCmd(imageName)).thenReturn(pullCmd);
+            when(pullCmd.exec(any(PullImageResultCallback.class))).thenReturn(pullCallback);
+            when(pullCallback.awaitCompletion()).thenReturn(pullCallback);
+
+            StopContainerCmd stopCmd = mock(StopContainerCmd.class);
+            when(dockerClient.stopContainerCmd(containerId)).thenReturn(stopCmd);
+            when(stopCmd.withTimeout(anyInt())).thenReturn(stopCmd);
+            doThrow(new NotModifiedException("already stopped")).when(stopCmd).exec();
+
+            RemoveContainerCmd removeCmd = mock(RemoveContainerCmd.class);
+            when(dockerClient.removeContainerCmd(containerId)).thenReturn(removeCmd);
+            when(removeCmd.withForce(true)).thenReturn(removeCmd);
+
+            CreateContainerCmd createCmd = mock(CreateContainerCmd.class);
+            CreateContainerResponse createResponse = mock(CreateContainerResponse.class);
+            when(dockerClient.createContainerCmd(imageName)).thenReturn(createCmd);
+            when(createCmd.withName(anyString())).thenReturn(createCmd);
+            when(createCmd.exec()).thenReturn(createResponse);
+            when(createResponse.getId()).thenReturn(newContainerId);
+
+            StartContainerCmd startCmd = mock(StartContainerCmd.class);
+            when(dockerClient.startContainerCmd(newContainerId)).thenReturn(startCmd);
+
+            containerService.updateContainer(containerId);
+
+            verify(dockerClient).removeContainerCmd(containerId);
+            verify(dockerClient).createContainerCmd(imageName);
+            verify(dockerClient).startContainerCmd(newContainerId);
+        }
+    }
+
+    @SuppressWarnings("unchecked")
+    private Map buildVolumesMap(Volume volume) {
+        Map<Object, Object> volumes = new HashMap<>();
+        volumes.put(volume, new Object());
+        return volumes;
     }
 
     @Nested

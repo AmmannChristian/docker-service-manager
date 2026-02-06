@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Docker Service Manager API</title>
+</head>
+<body>
+
+<h1>Docker Service Manager API</h1>
+
+<p>
+    REST API for managing and monitoring Docker containers.
+</p>
+
+<h2>Overview</h2>
+<p>
+    This API exposes endpoints to start, stop, inspect, and monitor Docker
+    containers. It is designed as a backend service and does not provide
+    a user interface.
+</p>
+
+<h2>Architecture</h2>
+<p>
+    The application follows a layered architecture:
+</p>
+<ul>
+    <li><b>Resource layer</b> – REST endpoints and request handling</li>
+    <li><b>Service layer</b> – business logic and Docker interaction</li>
+    <li><b>Configuration &amp; security</b> – application setup and access control</li>
+</ul>
+
+<h2>Package Structure</h2>
+<p>
+    The main packages are organized as follows:
+</p>
+<ul>
+    <li><code>*.resource</code> – REST controllers</li>
+    <li><code>*.service</code> – core application logic</li>
+    <li><code>*.dto</code> – data transfer objects</li>
+    <li><code>*.security</code> – authentication and authorization</li>
+    <li><code>*.config</code> – application configuration</li>
+</ul>
+
+<h2>Getting Started</h2>
+<p>
+    Begin by exploring the <code>resource</code> package to see the available
+    REST endpoints. Each endpoint is documented with request and response
+    models.
+</p>
+
+<hr/>
+
+<p>
+    <b>Author:</b> Christian Ammann<br/>
+    <b>Context:</b> Bachelor’s Thesis, 2026
+</p>
+
+</body>
+</html>

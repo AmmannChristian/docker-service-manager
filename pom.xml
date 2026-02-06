@@ -251,6 +251,17 @@
                     </execution>
                 </executions>
             </plugin>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-javadoc-plugin</artifactId>
+                <configuration>
+                    <failOnError>false</failOnError>
+                    <doclint>none</doclint>
+                    <overview>${project.basedir}/src/main/javadoc/overview.html</overview>
+                    <doctitle>Docker Service Manager ${project.version} API</doctitle>
+                    <windowtitle>Docker Service Manager API</windowtitle>
+                </configuration>
+            </plugin>
         </plugins>
     </build>
 

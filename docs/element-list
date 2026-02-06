@@ -1,0 +1,8 @@
+com.ammann.servicemanager.config
+com.ammann.servicemanager.dto
+com.ammann.servicemanager.exception
+com.ammann.servicemanager.health
+com.ammann.servicemanager.properties
+com.ammann.servicemanager.resource
+com.ammann.servicemanager.security
+com.ammann.servicemanager.service

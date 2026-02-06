@@ -9,6 +9,7 @@ A REST API for managing Docker containers, built with Quarkus. This service prov
 ## Table of Contents
 
 - [Features](#features)
+- [Documentation](#documentation)
 - [Requirements](#requirements)
 - [Quick Start](#quick-start)
 - [Configuration](#configuration)
@@ -19,6 +20,13 @@ A REST API for managing Docker containers, built with Quarkus. This service prov
 - [Docker](#docker)
 - [Contributing](#contributing)
 - [License](#license)
+
+## Documentation
+
+Detailed technical documentation is available in the `docs/` directory:
+
+- [Architecture Overview](docs/architecture.md) -- System design, component relationships, request processing flows, and deployment architecture with Mermaid diagrams
+- [API Reference](docs/api-reference.md) -- Complete REST API specification including endpoint details, request/response schemas, error formats, and authentication requirements
 
 ## Features
 

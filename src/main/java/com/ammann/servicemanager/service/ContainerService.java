@@ -26,6 +26,18 @@ import java.util.ArrayList;
 import java.util.List;
 import org.jboss.logging.Logger;
 
+/**
+ * Core service for Docker container lifecycle management.
+ *
+ * <p>Provides operations to list, start, stop, restart, and update containers as well
+ * as to retrieve and stream container logs. All mutating operations (stop, restart,
+ * update) enforce the configured container blacklist before proceeding.
+ *
+ * <p>The update operation performs a full container replacement: it pulls the latest
+ * image, removes the existing container, recreates it with the original configuration
+ * (environment variables, labels, ports, volumes, networks, health check), and starts
+ * the new container.
+ */
 @ApplicationScoped
 public class ContainerService {
 
@@ -35,29 +47,62 @@ public class ContainerService {
 
     @Inject ServiceBlacklistConfig blacklistConfig;
 
+    /**
+     * Lists Docker containers, optionally including stopped containers.
+     *
+     * @param showAll if {@code true}, includes containers in all states; otherwise only running
+     * @return a list of container summary DTOs
+     */
     public List<ContainerInfoDTO> listContainers(boolean showAll) {
         List<Container> containers = dockerClient.listContainersCmd().withShowAll(showAll).exec();
 
         return containers.stream().map(this::mapToContainerInfo).toList();
     }
 
+    /**
+     * Restarts a container after verifying it is not blacklisted.
+     *
+     * @param containerId the Docker container identifier
+     * @throws ServiceBlacklistedException if the container is blacklisted
+     */
     public void restartContainer(String containerId) {
         checkBlacklist(containerId);
         logger.infof("Restarting container: %s", containerId);
         dockerClient.restartContainerCmd(containerId).withTimeout(10).exec();
     }
 
+    /**
+     * Stops a container after verifying it is not blacklisted.
+     *
+     * @param containerId the Docker container identifier
+     * @throws ServiceBlacklistedException if the container is blacklisted
+     */
     public void stopContainer(String containerId) {
         checkBlacklist(containerId);
         logger.infof("Stopping container: %s", containerId);
         dockerClient.stopContainerCmd(containerId).withTimeout(10).exec();
     }
 
+    /**
+     * Starts a stopped container.
+     *
+     * @param containerId the Docker container identifier
+     */
     public void startContainer(String containerId) {
         logger.infof("Starting container: %s", containerId);
         dockerClient.startContainerCmd(containerId).exec();
     }
 
+    /**
+     * Checks whether a newer version of the given image is available in the remote registry.
+     *
+     * <p>Compares the local image identifier with the identifier obtained after pulling
+     * the latest tag. Returns {@code true} if the identifiers differ, indicating an
+     * update is available.
+     *
+     * @param imageName the image reference to check (including tag)
+     * @return {@code true} if a newer image is available in the registry
+     */
     public boolean checkForUpdate(String imageName) {
         try {
             List<Image> localImages =
@@ -90,6 +135,18 @@ public class ContainerService {
         }
     }
 
+    /**
+     * Performs a full container update by pulling the latest image and recreating the container.
+     *
+     * <p>The update sequence is: pull latest image, stop the existing container, capture
+     * its network connections, remove it, create a new container preserving the original
+     * configuration (environment, labels, ports, volumes, entrypoint, health check, host
+     * config), reconnect additional networks, and start the new container.
+     *
+     * @param containerId the Docker container identifier
+     * @throws ServiceBlacklistedException if the container is blacklisted
+     * @throws RuntimeException            if the update is interrupted or fails
+     */
     public void updateContainer(String containerId) {
         checkBlacklist(containerId);
         InspectContainerResponse containerInfo =
@@ -215,6 +272,7 @@ public class ContainerService {
         }
     }
 
+    /** Maps a Docker API {@link Container} model to a {@link ContainerInfoDTO}. */
     private ContainerInfoDTO mapToContainerInfo(Container container) {
         return new ContainerInfoDTO(
                 container.getId(),
@@ -224,6 +282,12 @@ public class ContainerService {
                 container.getStatus());
     }
 
+    /**
+     * Inspects the container and throws if it matches a blacklist entry.
+     *
+     * @param containerId the Docker container identifier
+     * @throws ServiceBlacklistedException if the container is blacklisted
+     */
     private void checkBlacklist(String containerId) {
         InspectContainerResponse info = dockerClient.inspectContainerCmd(containerId).exec();
         String name = info.getName();
@@ -237,6 +301,17 @@ public class ContainerService {
         }
     }
 
+    /**
+     * Streams container log output as a reactive {@link Multi}.
+     *
+     * <p>Attaches to the container's stdout and stderr with timestamps enabled.
+     * The underlying Docker log callback is closed automatically when the stream
+     * terminates.
+     *
+     * @param containerId the Docker container identifier
+     * @param follow      if {@code true}, the stream follows new output (similar to {@code tail -f})
+     * @return a reactive stream of log lines
+     */
     public Multi<String> streamContainerLogs(String containerId, boolean follow) {
         BroadcastProcessor<String> processor = BroadcastProcessor.create();
 
@@ -294,7 +369,11 @@ public class ContainerService {
     }
 
     /**
-     * Holt historische Logs (nicht live)
+     * Retrieves historical container logs (non-streaming).
+     *
+     * @param containerId the Docker container identifier
+     * @param tailLines   the maximum number of trailing log lines to return
+     * @return the concatenated log output, or an error message if retrieval is interrupted
      */
     public String getContainerLogs(String containerId, int tailLines) {
         try {

@@ -63,7 +63,9 @@ public class ZitadelRolesAugmentor implements SecurityIdentityAugmentor {
     }
 
     /**
-     * Blocking augmentation logic - extracts roles from JWT or introspection response.
+     * Synchronously extracts roles from the JWT or token introspection response and
+     * returns a new {@link SecurityIdentity} augmented with those roles. If no roles
+     * can be extracted, the original identity is returned unchanged.
      */
     private SecurityIdentity augmentBlocking(SecurityIdentity identity) {
         Set<String> extractedRoles = new HashSet<>();
@@ -213,6 +215,14 @@ public class ZitadelRolesAugmentor implements SecurityIdentityAugmentor {
         return roles;
     }
 
+    /**
+     * Adds role names from a ZITADEL roles claim to the target set if the claim is a
+     * {@link Map}. The map keys are interpreted as role names.
+     *
+     * @param roles      the mutable set to which extracted role names are added
+     * @param rolesClaim the raw claim value (expected to be a {@code Map<String, Object>})
+     * @param key        the claim key, used for log messages
+     */
     private void addRoles(Set<String> roles, Object rolesClaim, String key) {
         if (!(rolesClaim instanceof Map<?, ?> rawMap)) {
             return;

@@ -12,12 +12,24 @@ import java.time.Duration;
 import java.util.Optional;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 
+/**
+ * CDI producer for the Docker API client.
+ *
+ * <p>Creates an application-scoped {@link DockerClient} configured with an Apache HTTP
+ * transport. The Docker host URI defaults to the system default (typically the local Unix
+ * socket) but can be overridden via the {@code docker.host} configuration property.
+ */
 @ApplicationScoped
 public class DockerClientProducer {
 
     @ConfigProperty(name = "docker.host")
     Optional<String> dockerHostOverride;
 
+    /**
+     * Produces an application-scoped {@link DockerClient} instance.
+     *
+     * @return a fully configured Docker client ready for API calls
+     */
     @Produces
     @ApplicationScoped
     public DockerClient dockerClient() {

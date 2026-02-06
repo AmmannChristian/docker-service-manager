@@ -22,8 +22,10 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
 /**
- * Unit tests for ContainerResource.
- * These tests verify the resource logic without starting the Quarkus server.
+ * Unit tests for {@link ContainerResource}.
+ *
+ * <p>Verifies the resource delegation logic and parameter forwarding without
+ * starting the Quarkus server. Dependencies are injected via reflection.
  */
 @DisplayName("ContainerResource")
 class ContainerResourceTest {

@@ -7,6 +7,18 @@ import jakarta.inject.Inject;
 import java.util.List;
 import org.jboss.logging.Logger;
 
+/**
+ * Scheduled background service that monitors Docker containers.
+ *
+ * <p>Performs two periodic tasks:
+ * <ul>
+ *   <li>Checks for available image updates for remote containers (every 5 minutes).</li>
+ *   <li>Verifies that all containers are in the "running" state (every 30 seconds).</li>
+ * </ul>
+ *
+ * <p>Local images (those without a registry prefix) are excluded from update checks
+ * because they cannot be pulled from a remote registry.
+ */
 @ApplicationScoped
 public class ContainerMonitorService {
 
@@ -14,6 +26,10 @@ public class ContainerMonitorService {
 
     @Inject Logger logger;
 
+    /**
+     * Iterates over all running containers and checks whether a newer image version
+     * is available in the remote registry. Local images are skipped.
+     */
     @Scheduled(every = "5m")
     public void checkForUpdates() {
         logger.debugf("Checking for container updates...");
@@ -40,8 +56,14 @@ public class ContainerMonitorService {
     }
 
     /**
-     * Checks if an image is from a remote registry.
-     * Local images (built locally without registry prefix) are skipped.
+     * Determines whether a Docker image originates from a remote registry.
+     *
+     * <p>An image is considered remote if its first path segment contains a dot
+     * (e.g. {@code ghcr.io}, {@code docker.io}) or a colon (e.g. {@code localhost:5000}).
+     * Single-segment images without a registry prefix are treated as local builds.
+     *
+     * @param image the image reference (name and optional tag)
+     * @return {@code true} if the image appears to originate from a remote registry
      */
     private boolean isRemoteImage(String image) {
         if (image == null || image.isBlank()) {
@@ -66,6 +88,9 @@ public class ContainerMonitorService {
         return false;
     }
 
+    /**
+     * Logs a warning for each container that is not in the "running" state.
+     */
     @Scheduled(every = "30s")
     public void healthCheck() {
         List<ContainerInfoDTO> containers = containerService.listContainers(false);

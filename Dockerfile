@@ -24,7 +24,7 @@ RUN ./mvnw package -DskipTests -Dspotless.check.skip=true -B
 
 # Stage: Development
 # Purpose: Hot reload development with Quarkus dev mode
-# Usage: docker build --target dev -t entropy-analytics:dev .
+# Usage: docker build --target dev -t entropy-processor:dev .
 FROM maven:3.9.9-eclipse-temurin-21 AS dev
 
 WORKDIR /app
@@ -67,7 +67,7 @@ ENTRYPOINT ["./mvnw", "quarkus:dev", "-Dquarkus.http.host=0.0.0.0", "-Ddebug=500
 
 # Stage: Production (JVM Mode)
 # Purpose: Optimized production deployment with JVM
-# Usage: docker build --target prod -t entropy-analytics:prod .
+# Usage: docker build --target prod -t entropy-processor:prod .
 FROM registry.access.redhat.com/ubi9/openjdk-21-runtime:1.23 AS prod
 
 WORKDIR /deployments
@@ -131,7 +131,7 @@ RUN ./mvnw package -Dnative -DskipTests -B
 
 # Stage: Native (Production Native Image)
 # Purpose: Minimal production image with native executable
-# Usage: docker build --target prod-native -t entropy-analytics:prod-native .
+# Usage: docker build --target prod-native -t entropy-processor:prod-native .
 FROM registry.access.redhat.com/ubi9/ubi-minimal:9.5 AS prod-native
 
 WORKDIR /work

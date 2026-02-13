@@ -42,7 +42,7 @@ import org.jboss.resteasy.reactive.RestStreamElementType;
 @Tag(name = "Container Management", description = "Docker container lifecycle and log management")
 @Produces(MediaType.APPLICATION_JSON)
 @Consumes(MediaType.APPLICATION_JSON)
-@RolesAllowed("SUPER_ADMIN_ROLE")
+@RolesAllowed("${quarkus.service-manager.role:SERVICE_MANAGER_ROLE}")
 public class ContainerResource {
 
     private static final String CONTAINER_ID_PATTERN = "^[a-fA-F0-9]{12,64}$";

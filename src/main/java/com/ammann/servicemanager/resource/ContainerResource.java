@@ -1,8 +1,11 @@
 package com.ammann.servicemanager.resource;
 
-import com.ammann.servicemanager.dto.ContainerInfoDTO;
 import com.ammann.servicemanager.properties.ApiProperties;
+import com.ammann.servicemanager.security.InMemorySseTokenStore;
+import com.ammann.servicemanager.security.SseTokenStore;
 import com.ammann.servicemanager.service.ContainerService;
+import com.ammann.servicemanager.dto.ContainerInfoDTO;
+import io.quarkus.oidc.AccessTokenCredential;
 import io.smallrye.mutiny.Multi;
 import jakarta.annotation.security.RolesAllowed;
 import jakarta.inject.Inject;
@@ -17,8 +20,10 @@ import jakarta.ws.rs.POST;
 import jakarta.ws.rs.Path;
 import jakarta.ws.rs.Produces;
 import jakarta.ws.rs.core.MediaType;
+import jakarta.ws.rs.core.NewCookie;
 import jakarta.ws.rs.core.Response;
 import java.util.List;
+import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.eclipse.microprofile.openapi.annotations.Operation;
 import org.eclipse.microprofile.openapi.annotations.enums.SchemaType;
 import org.eclipse.microprofile.openapi.annotations.media.Content;
@@ -52,6 +57,13 @@ public class ContainerResource {
     @Inject Logger logger;
 
     @Inject ContainerService containerService;
+
+    @Inject AccessTokenCredential accessTokenCredential;
+
+    @Inject SseTokenStore sseTokenStore;
+
+    @ConfigProperty(name = "sse.cookie.same-site", defaultValue = "STRICT")
+    String sseCookieSameSite;
 
     @GET
     @Operation(summary = "List containers", description = "Returns a list of all Docker containers")
@@ -216,6 +228,53 @@ public class ContainerResource {
         logger.debugf("Fetching logs for container %s (tail=%d)", containerId, tail);
 
         return containerService.getContainerLogs(containerId, tail);
+    }
+
+    @POST
+    @Path("/{id}/logs/stream/token")
+    @Operation(
+            summary = "Prepare SSE log stream",
+            description =
+                    "Issues a short-lived cookie (sse-token) that authorises the subsequent SSE"
+                        + " connection. Call this before opening the EventSource so that the"
+                        + " browser can send the HttpOnly cookie instead of a token in the URL.")
+    @APIResponses({
+        @APIResponse(
+                responseCode = "204",
+                description = "Cookie set; open the SSE stream within 30 seconds"),
+        @APIResponse(responseCode = "400", description = "Invalid container ID format"),
+        @APIResponse(responseCode = "401", description = "Unauthorized"),
+        @APIResponse(responseCode = "403", description = "Forbidden"),
+        @APIResponse(responseCode = "500", description = "Internal error")
+    })
+    public Response prepareLogStream(
+            @Parameter(description = CONTAINER_ID_DESCRIPTION, required = true)
+                    @RestPath("id")
+                    @NotBlank
+                    @Pattern(regexp = CONTAINER_ID_PATTERN, message = "Invalid container ID format")
+                    String containerId) {
+
+        logger.debugf("Issuing SSE token for container %s", containerId);
+
+        String uuid = sseTokenStore.createToken(accessTokenCredential.getToken());
+        String cookiePath =
+                ApiProperties.BASE_URL_V1
+                        + ApiProperties.Container.BASE
+                        + "/"
+                        + containerId
+                        + "/logs/stream";
+
+        NewCookie cookie =
+                new NewCookie.Builder("sse-token")
+                        .value(uuid)
+                        .httpOnly(true)
+                        .secure(true)
+                        .sameSite(NewCookie.SameSite.valueOf(sseCookieSameSite.toUpperCase()))
+                        .path(cookiePath)
+                        .maxAge(InMemorySseTokenStore.TTL_SECONDS)
+                        .build();
+
+        return Response.noContent().cookie(cookie).build();
     }
 
     @GET

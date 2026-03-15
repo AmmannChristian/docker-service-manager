@@ -14,7 +14,7 @@ class ContainerInfoDTOTest {
     void shouldCreateRecordWithAllFields() {
         ContainerInfoDTO dto =
                 new ContainerInfoDTO(
-                        "abc123", "my-container", "nginx:latest", "running", "Up 5 hours");
+                        "abc123", "my-container", "nginx:latest", "running", "Up 5 hours", false);
 
         assertThat(dto.id()).isEqualTo("abc123");
         assertThat(dto.name()).isEqualTo("my-container");
@@ -27,10 +27,11 @@ class ContainerInfoDTOTest {
     @DisplayName("should support equality")
     void shouldSupportEquality() {
         ContainerInfoDTO dto1 =
-                new ContainerInfoDTO("id1", "name1", "image1", "running", "status1");
+                new ContainerInfoDTO("id1", "name1", "image1", "running", "status1", false);
         ContainerInfoDTO dto2 =
-                new ContainerInfoDTO("id1", "name1", "image1", "running", "status1");
-        ContainerInfoDTO dto3 = new ContainerInfoDTO("id2", "name2", "image2", "exited", "status2");
+                new ContainerInfoDTO("id1", "name1", "image1", "running", "status1", false);
+        ContainerInfoDTO dto3 =
+                new ContainerInfoDTO("id2", "name2", "image2", "exited", "status2", false);
 
         assertThat(dto1).isEqualTo(dto2);
         assertThat(dto1).isNotEqualTo(dto3);
@@ -40,9 +41,9 @@ class ContainerInfoDTOTest {
     @DisplayName("should support hashCode")
     void shouldSupportHashCode() {
         ContainerInfoDTO dto1 =
-                new ContainerInfoDTO("id1", "name1", "image1", "running", "status1");
+                new ContainerInfoDTO("id1", "name1", "image1", "running", "status1", false);
         ContainerInfoDTO dto2 =
-                new ContainerInfoDTO("id1", "name1", "image1", "running", "status1");
+                new ContainerInfoDTO("id1", "name1", "image1", "running", "status1", false);
 
         assertThat(dto1.hashCode()).hasSameHashCodeAs(dto2);
     }
@@ -52,7 +53,7 @@ class ContainerInfoDTOTest {
     void shouldSupportToString() {
         ContainerInfoDTO dto =
                 new ContainerInfoDTO(
-                        "abc123", "my-container", "nginx:latest", "running", "Up 5 hours");
+                        "abc123", "my-container", "nginx:latest", "running", "Up 5 hours", false);
 
         String toString = dto.toString();
 
@@ -66,7 +67,7 @@ class ContainerInfoDTOTest {
     @Test
     @DisplayName("should handle null values")
     void shouldHandleNullValues() {
-        ContainerInfoDTO dto = new ContainerInfoDTO(null, null, null, null, null);
+        ContainerInfoDTO dto = new ContainerInfoDTO(null, null, null, null, null, false);
 
         assertThat(dto.id()).isNull();
         assertThat(dto.name()).isNull();

@@ -51,13 +51,15 @@ class ContainerMonitorServiceTest {
                                     "container1",
                                     "docker.io/library/nginx:latest",
                                     "running",
-                                    "Up 5 hours"),
+                                    "Up 5 hours",
+                                    false),
                             new ContainerInfoDTO(
                                     "id2",
                                     "container2",
                                     "ghcr.io/myorg/redis:7",
                                     "running",
-                                    "Up 3 hours"));
+                                    "Up 3 hours",
+                                    false));
 
             when(containerService.listContainers(false)).thenReturn(containers);
             when(containerService.checkForUpdate("docker.io/library/nginx:latest"))
@@ -92,19 +94,22 @@ class ContainerMonitorServiceTest {
                                     "container1",
                                     "docker.io/library/nginx:latest",
                                     "running",
-                                    "Up 5 hours"),
+                                    "Up 5 hours",
+                                    false),
                             new ContainerInfoDTO(
                                     "id2",
                                     "container2",
                                     "ghcr.io/myorg/redis:7",
                                     "running",
-                                    "Up 3 hours"),
+                                    "Up 3 hours",
+                                    false),
                             new ContainerInfoDTO(
                                     "id3",
                                     "container3",
                                     "quay.io/myorg/postgres:15",
                                     "running",
-                                    "Up 1 hour"));
+                                    "Up 1 hour",
+                                    false));
 
             when(containerService.listContainers(false)).thenReturn(containers);
             when(containerService.checkForUpdate("docker.io/library/nginx:latest"))
@@ -130,7 +135,8 @@ class ContainerMonitorServiceTest {
                                     "my-app",
                                     "ghcr.io/myorg/myapp:v1",
                                     "running",
-                                    "Up 5 hours"));
+                                    "Up 5 hours",
+                                    false));
 
             when(containerService.listContainers(false)).thenReturn(containers);
             when(containerService.checkForUpdate("ghcr.io/myorg/myapp:v1")).thenReturn(true);
@@ -151,9 +157,19 @@ class ContainerMonitorServiceTest {
             List<ContainerInfoDTO> containers =
                     Arrays.asList(
                             new ContainerInfoDTO(
-                                    "id1", "container1", "nginx:latest", "running", "Up 5 hours"),
+                                    "id1",
+                                    "container1",
+                                    "nginx:latest",
+                                    "running",
+                                    "Up 5 hours",
+                                    false),
                             new ContainerInfoDTO(
-                                    "id2", "container2", "redis:7", "running", "Up 3 hours"));
+                                    "id2",
+                                    "container2",
+                                    "redis:7",
+                                    "running",
+                                    "Up 3 hours",
+                                    false));
 
             when(containerService.listContainers(false)).thenReturn(containers);
 
@@ -168,15 +184,21 @@ class ContainerMonitorServiceTest {
             List<ContainerInfoDTO> containers =
                     Arrays.asList(
                             new ContainerInfoDTO(
-                                    "id1", "container1", "nginx:latest", "running", "Up 5 hours"),
+                                    "id1",
+                                    "container1",
+                                    "nginx:latest",
+                                    "running",
+                                    "Up 5 hours",
+                                    false),
                             new ContainerInfoDTO(
                                     "id2",
                                     "container2",
                                     "redis:7",
                                     "exited",
-                                    "Exited (0) 1 hour ago"),
+                                    "Exited (0) 1 hour ago",
+                                    false),
                             new ContainerInfoDTO(
-                                    "id3", "container3", "postgres:15", "paused", "Paused"));
+                                    "id3", "container3", "postgres:15", "paused", "Paused", false));
 
             when(containerService.listContainers(false)).thenReturn(containers);
 
@@ -201,9 +223,19 @@ class ContainerMonitorServiceTest {
             List<ContainerInfoDTO> containers =
                     Arrays.asList(
                             new ContainerInfoDTO(
-                                    "id1", "container1", "nginx:latest", "Running", "Up 5 hours"),
+                                    "id1",
+                                    "container1",
+                                    "nginx:latest",
+                                    "Running",
+                                    "Up 5 hours",
+                                    false),
                             new ContainerInfoDTO(
-                                    "id2", "container2", "redis:7", "RUNNING", "Up 3 hours"));
+                                    "id2",
+                                    "container2",
+                                    "redis:7",
+                                    "RUNNING",
+                                    "Up 3 hours",
+                                    false));
 
             when(containerService.listContainers(false)).thenReturn(containers);
 

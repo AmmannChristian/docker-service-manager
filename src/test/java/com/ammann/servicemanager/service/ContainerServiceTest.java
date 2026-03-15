@@ -123,15 +123,35 @@ class ContainerServiceTest {
 
             assertThat(result).hasSize(2);
             assertThat(result.getFirst().id()).isEqualTo("id1");
-            assertThat(result.getFirst().name()).isEqualTo("/container1");
+            assertThat(result.getFirst().name()).isEqualTo("container1");
             assertThat(result.getFirst().image()).isEqualTo("nginx:latest");
             assertThat(result.getFirst().state()).isEqualTo("running");
             assertThat(result.getFirst().status()).isEqualTo("Up 5 hours");
+            assertThat(result.getFirst().blacklisted()).isFalse();
 
             assertThat(result.get(1).id()).isEqualTo("id2");
             assertThat(result.get(1).state()).isEqualTo("exited");
+            assertThat(result.get(1).blacklisted()).isFalse();
 
             verify(listCmd).withShowAll(true);
+        }
+
+        @Test
+        @DisplayName("should mark blacklisted containers")
+        void shouldMarkBlacklistedContainers() {
+            Container container1 =
+                    createMockContainer("id1", "/traefik", "traefik:v3.1", "running", "Up 5 hours");
+            when(blacklistConfig.isBlacklisted("id1", "traefik", "traefik:v3.1")).thenReturn(true);
+
+            ListContainersCmd listCmd = mock(ListContainersCmd.class);
+            when(dockerClient.listContainersCmd()).thenReturn(listCmd);
+            when(listCmd.withShowAll(anyBoolean())).thenReturn(listCmd);
+            when(listCmd.exec()).thenReturn(Collections.singletonList(container1));
+
+            List<ContainerInfoDTO> result = containerService.listContainers(true);
+
+            assertThat(result).hasSize(1);
+            assertThat(result.getFirst().blacklisted()).isTrue();
         }
     }
 

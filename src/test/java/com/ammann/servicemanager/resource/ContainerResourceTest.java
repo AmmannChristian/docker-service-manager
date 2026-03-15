@@ -77,13 +77,15 @@ class ContainerResourceTest {
                                     "nginx-proxy",
                                     "nginx:latest",
                                     "running",
-                                    "Up 5 hours"),
+                                    "Up 5 hours",
+                                    false),
                             new ContainerInfoDTO(
                                     "def456abc789",
                                     "redis-cache",
                                     "redis:7",
                                     "running",
-                                    "Up 3 hours"));
+                                    "Up 3 hours",
+                                    false));
             when(containerService.listContainers(false)).thenReturn(containers);
 
             List<ContainerInfoDTO> result = resource.listContainers(false);

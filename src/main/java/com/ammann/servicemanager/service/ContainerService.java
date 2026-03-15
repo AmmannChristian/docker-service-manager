@@ -10,13 +10,7 @@ import com.github.dockerjava.api.command.CreateContainerCmd;
 import com.github.dockerjava.api.command.InspectContainerResponse;
 import com.github.dockerjava.api.command.PullImageResultCallback;
 import com.github.dockerjava.api.exception.NotModifiedException;
-import com.github.dockerjava.api.model.Container;
-import com.github.dockerjava.api.model.ContainerNetwork;
-import com.github.dockerjava.api.model.Frame;
-import com.github.dockerjava.api.model.HostConfig;
-import com.github.dockerjava.api.model.Image;
-import com.github.dockerjava.api.model.NetworkSettings;
-import com.github.dockerjava.api.model.Volume;
+import com.github.dockerjava.api.model.*;
 import io.smallrye.mutiny.Multi;
 import io.smallrye.mutiny.operators.multi.processors.BroadcastProcessor;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -272,14 +266,23 @@ public class ContainerService {
         }
     }
 
-    /** Maps a Docker API {@link Container} model to a {@link ContainerInfoDTO}. */
+    /**
+     * Maps a Docker API {@link Container} model to a {@link ContainerInfoDTO}.
+     */
     private ContainerInfoDTO mapToContainerInfo(Container container) {
+        String name = container.getNames()[0];
+        name = name.startsWith("/") ? name.substring(1) : name;
+
+        boolean blacklisted =
+                blacklistConfig.isBlacklisted(container.getId(), name, container.getImage());
+
         return new ContainerInfoDTO(
                 container.getId(),
-                container.getNames()[0],
+                name,
                 container.getImage(),
                 container.getState(),
-                container.getStatus());
+                container.getStatus(),
+                blacklisted);
     }
 
     /**

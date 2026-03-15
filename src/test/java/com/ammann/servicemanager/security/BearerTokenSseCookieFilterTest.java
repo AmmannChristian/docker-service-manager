@@ -2,46 +2,51 @@
 package com.ammann.servicemanager.security;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.*;
 
-import jakarta.ws.rs.container.ContainerRequestContext;
-import jakarta.ws.rs.core.Cookie;
-import jakarta.ws.rs.core.HttpHeaders;
-import jakarta.ws.rs.core.MultivaluedHashMap;
-import jakarta.ws.rs.core.MultivaluedMap;
-import jakarta.ws.rs.core.UriInfo;
-import java.util.HashMap;
-import java.util.Map;
+import io.quarkus.security.identity.IdentityProviderManager;
+import io.quarkus.security.identity.SecurityIdentity;
+import io.quarkus.security.identity.request.TokenAuthenticationRequest;
+import io.smallrye.mutiny.Uni;
+import io.vertx.core.MultiMap;
+import io.vertx.core.http.Cookie;
+import io.vertx.core.http.HttpServerRequest;
+import io.vertx.ext.web.RoutingContext;
 import java.util.Optional;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 
 @DisplayName("BearerTokenSseCookieFilter")
 class BearerTokenSseCookieFilterTest {
 
     BearerTokenSseCookieFilter filter;
     SseTokenStore sseTokenStore;
-    ContainerRequestContext requestContext;
-    UriInfo uriInfo;
-    MultivaluedMap<String, String> headers;
-    Map<String, Cookie> cookies;
+    RoutingContext rc;
+    HttpServerRequest request;
+    MultiMap headers;
+    IdentityProviderManager identityProviderManager;
+    SecurityIdentity mockIdentity;
 
     @BeforeEach
     void setUp() {
         sseTokenStore = mock(SseTokenStore.class);
-        filter = new BearerTokenSseCookieFilter();
-        filter.sseTokenStore = sseTokenStore;
+        filter = new BearerTokenSseCookieFilter(sseTokenStore);
 
-        requestContext = mock(ContainerRequestContext.class);
-        uriInfo = mock(UriInfo.class);
-        headers = new MultivaluedHashMap<>();
-        cookies = new HashMap<>();
+        rc = mock(RoutingContext.class);
+        request = mock(HttpServerRequest.class);
+        headers = MultiMap.caseInsensitiveMultiMap();
+        identityProviderManager = mock(IdentityProviderManager.class);
+        mockIdentity = mock(SecurityIdentity.class);
 
-        when(requestContext.getUriInfo()).thenReturn(uriInfo);
-        when(requestContext.getHeaders()).thenReturn(headers);
-        when(requestContext.getCookies()).thenReturn(cookies);
+        when(rc.request()).thenReturn(request);
+        when(request.headers()).thenReturn(headers);
+
+        when(identityProviderManager.authenticate(any(TokenAuthenticationRequest.class)))
+                .thenReturn(Uni.createFrom().item(mockIdentity));
     }
 
     @Nested
@@ -83,105 +88,134 @@ class BearerTokenSseCookieFilterTest {
     }
 
     @Nested
-    @DisplayName("Filter Behavior")
-    class FilterBehavior {
+    @DisplayName("Authentication Mechanism Behavior")
+    class AuthMechanismBehavior {
 
         @Test
-        @DisplayName("should set Authorization header when valid sse-token cookie present")
-        void shouldSetAuthorizationHeaderForValidCookie() {
-            when(uriInfo.getPath()).thenReturn("/api/v1/containers/abc123/logs/stream");
-            when(requestContext.getHeaderString(HttpHeaders.AUTHORIZATION)).thenReturn(null);
-            cookies.put("sse-token", new Cookie("sse-token", "valid-uuid"));
+        @DisplayName(
+                "should authenticate via IdentityProviderManager when valid sse-token cookie"
+                        + " present")
+        void shouldAuthenticateForValidCookie() {
+            when(request.path()).thenReturn("/api/v1/containers/abc123/logs/stream");
+            when(request.getHeader("Authorization")).thenReturn(null);
+            when(request.getCookie("sse-token"))
+                    .thenReturn(Cookie.cookie("sse-token", "valid-uuid"));
             when(sseTokenStore.getToken("valid-uuid")).thenReturn(Optional.of("raw.jwt.token"));
 
-            filter.filter(requestContext);
+            SecurityIdentity result =
+                    filter.authenticate(rc, identityProviderManager).await().indefinitely();
 
-            assertThat(headers.getFirst(HttpHeaders.AUTHORIZATION))
-                    .isEqualTo("Bearer raw.jwt.token");
+            assertThat(result).isSameAs(mockIdentity);
+
+            ArgumentCaptor<TokenAuthenticationRequest> captor =
+                    ArgumentCaptor.forClass(TokenAuthenticationRequest.class);
+            verify(identityProviderManager).authenticate(captor.capture());
+            assertThat(captor.getValue().getToken().getToken()).isEqualTo("raw.jwt.token");
         }
 
         @Test
         @DisplayName("should remain usable across multiple calls within TTL (reconnect support)")
         void shouldRemainUsableOnReconnect() {
-            when(uriInfo.getPath()).thenReturn("/api/v1/containers/abc123/logs/stream");
-            when(requestContext.getHeaderString(HttpHeaders.AUTHORIZATION)).thenReturn(null);
-            cookies.put("sse-token", new Cookie("sse-token", "valid-uuid"));
+            when(request.path()).thenReturn("/api/v1/containers/abc123/logs/stream");
+            when(request.getHeader("Authorization")).thenReturn(null);
+            when(request.getCookie("sse-token"))
+                    .thenReturn(Cookie.cookie("sse-token", "valid-uuid"));
             when(sseTokenStore.getToken("valid-uuid")).thenReturn(Optional.of("raw.jwt.token"));
 
-            filter.filter(requestContext);
-            headers.clear();
-            filter.filter(requestContext);
+            filter.authenticate(rc, identityProviderManager).await().indefinitely();
+            filter.authenticate(rc, identityProviderManager).await().indefinitely();
 
-            // getToken called twice (once per connection attempt)
             verify(sseTokenStore, times(2)).getToken("valid-uuid");
-            assertThat(headers.getFirst(HttpHeaders.AUTHORIZATION))
-                    .isEqualTo("Bearer raw.jwt.token");
+            verify(identityProviderManager, times(2))
+                    .authenticate(any(TokenAuthenticationRequest.class));
         }
 
         @Test
-        @DisplayName("should skip when sse-token cookie is absent")
-        void shouldSkipWhenCookieAbsent() {
-            when(uriInfo.getPath()).thenReturn("/api/v1/containers/abc123/logs/stream");
-            when(requestContext.getHeaderString(HttpHeaders.AUTHORIZATION)).thenReturn(null);
-            // No cookie in map
+        @DisplayName("should return null identity when sse-token cookie is absent")
+        void shouldReturnNullWhenCookieAbsent() {
+            when(request.path()).thenReturn("/api/v1/containers/abc123/logs/stream");
+            when(request.getHeader("Authorization")).thenReturn(null);
+            when(request.getCookie("sse-token")).thenReturn(null);
 
-            filter.filter(requestContext);
+            SecurityIdentity result =
+                    filter.authenticate(rc, identityProviderManager).await().indefinitely();
 
-            assertThat(headers.get(HttpHeaders.AUTHORIZATION)).isNull();
+            assertThat(result).isNull();
             verifyNoInteractions(sseTokenStore);
+            verifyNoInteractions(identityProviderManager);
         }
 
         @Test
-        @DisplayName("should skip when getToken returns empty (expired or unknown)")
-        void shouldSkipWhenTokenLookupFails() {
-            when(uriInfo.getPath()).thenReturn("/api/v1/containers/abc123/logs/stream");
-            when(requestContext.getHeaderString(HttpHeaders.AUTHORIZATION)).thenReturn(null);
-            cookies.put("sse-token", new Cookie("sse-token", "unknown-uuid"));
+        @DisplayName("should return null identity when getToken returns empty (expired or unknown)")
+        void shouldReturnNullWhenTokenLookupFails() {
+            when(request.path()).thenReturn("/api/v1/containers/abc123/logs/stream");
+            when(request.getHeader("Authorization")).thenReturn(null);
+            when(request.getCookie("sse-token"))
+                    .thenReturn(Cookie.cookie("sse-token", "unknown-uuid"));
             when(sseTokenStore.getToken("unknown-uuid")).thenReturn(Optional.empty());
 
-            filter.filter(requestContext);
+            SecurityIdentity result =
+                    filter.authenticate(rc, identityProviderManager).await().indefinitely();
 
-            assertThat(headers.get(HttpHeaders.AUTHORIZATION)).isNull();
+            assertThat(result).isNull();
+            verifyNoInteractions(identityProviderManager);
         }
 
         @Test
         @DisplayName("should not override existing Authorization header")
         void shouldNotOverrideExistingAuthHeader() {
-            when(uriInfo.getPath()).thenReturn("/api/v1/containers/abc123/logs/stream");
-            when(requestContext.getHeaderString(HttpHeaders.AUTHORIZATION))
-                    .thenReturn("Bearer existing.token");
-            cookies.put("sse-token", new Cookie("sse-token", "valid-uuid"));
+            when(request.path()).thenReturn("/api/v1/containers/abc123/logs/stream");
+            when(request.getHeader("Authorization")).thenReturn("Bearer existing.token");
+            when(request.getCookie("sse-token"))
+                    .thenReturn(Cookie.cookie("sse-token", "valid-uuid"));
 
-            filter.filter(requestContext);
+            SecurityIdentity result =
+                    filter.authenticate(rc, identityProviderManager).await().indefinitely();
 
-            assertThat(headers.get(HttpHeaders.AUTHORIZATION)).isNull();
+            assertThat(result).isNull();
             verifyNoInteractions(sseTokenStore);
+            verifyNoInteractions(identityProviderManager);
         }
 
         @Test
-        @DisplayName("should skip non-SSE endpoints entirely")
-        void shouldSkipNonSseEndpoints() {
-            when(uriInfo.getPath()).thenReturn("/api/v1/containers");
-            cookies.put("sse-token", new Cookie("sse-token", "valid-uuid"));
+        @DisplayName("should return null identity for non-SSE endpoints")
+        void shouldReturnNullForNonSseEndpoints() {
+            when(request.path()).thenReturn("/api/v1/containers");
 
-            filter.filter(requestContext);
+            SecurityIdentity result =
+                    filter.authenticate(rc, identityProviderManager).await().indefinitely();
 
-            assertThat(headers.get(HttpHeaders.AUTHORIZATION)).isNull();
+            assertThat(result).isNull();
             verifyNoInteractions(sseTokenStore);
+            verifyNoInteractions(identityProviderManager);
         }
 
         @Test
         @DisplayName("should treat blank Authorization header as absent")
         void shouldTreatBlankAuthHeaderAsAbsent() {
-            when(uriInfo.getPath()).thenReturn("/api/v1/containers/abc123/logs/stream");
-            when(requestContext.getHeaderString(HttpHeaders.AUTHORIZATION)).thenReturn("   ");
-            cookies.put("sse-token", new Cookie("sse-token", "valid-uuid"));
+            when(request.path()).thenReturn("/api/v1/containers/abc123/logs/stream");
+            when(request.getHeader("Authorization")).thenReturn("   ");
+            when(request.getCookie("sse-token"))
+                    .thenReturn(Cookie.cookie("sse-token", "valid-uuid"));
             when(sseTokenStore.getToken("valid-uuid")).thenReturn(Optional.of("raw.jwt.token"));
 
-            filter.filter(requestContext);
+            SecurityIdentity result =
+                    filter.authenticate(rc, identityProviderManager).await().indefinitely();
 
-            assertThat(headers.getFirst(HttpHeaders.AUTHORIZATION))
-                    .isEqualTo("Bearer raw.jwt.token");
+            assertThat(result).isSameAs(mockIdentity);
+        }
+
+        @Test
+        @DisplayName("should include TokenAuthenticationRequest in credential types")
+        void shouldIncludeTokenAuthRequestInCredentialTypes() {
+            assertThat(filter.getCredentialTypes())
+                    .containsExactly(TokenAuthenticationRequest.class);
+        }
+
+        @Test
+        @DisplayName("should return null credential transport")
+        void shouldReturnNullCredentialTransport() {
+            assertThat(filter.getCredentialTransport(rc).await().indefinitely()).isNull();
         }
     }
 }

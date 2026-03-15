@@ -1,37 +1,45 @@
 /* (C)2026 */
 package com.ammann.servicemanager.security;
 
-import jakarta.annotation.Priority;
+import io.quarkus.oidc.AccessTokenCredential;
+import io.quarkus.security.identity.IdentityProviderManager;
+import io.quarkus.security.identity.SecurityIdentity;
+import io.quarkus.security.identity.request.AuthenticationRequest;
+import io.quarkus.security.identity.request.TokenAuthenticationRequest;
+import io.quarkus.vertx.http.runtime.security.ChallengeData;
+import io.quarkus.vertx.http.runtime.security.HttpAuthenticationMechanism;
+import io.quarkus.vertx.http.runtime.security.HttpCredentialTransport;
+import io.quarkus.vertx.http.runtime.security.HttpSecurityUtils;
+import io.smallrye.mutiny.Uni;
+import io.vertx.core.http.Cookie;
+import io.vertx.ext.web.RoutingContext;
+import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
-import jakarta.ws.rs.Priorities;
-import jakarta.ws.rs.container.ContainerRequestContext;
-import jakarta.ws.rs.container.ContainerRequestFilter;
-import jakarta.ws.rs.container.PreMatching;
-import jakarta.ws.rs.core.Cookie;
-import jakarta.ws.rs.core.HttpHeaders;
-import jakarta.ws.rs.core.UriInfo;
-import jakarta.ws.rs.ext.Provider;
-import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import org.jboss.logging.Logger;
 
 /**
- * JAX-RS filter that extracts bearer tokens from the {@code sse-token} cookie for SSE endpoints.
+ * Quarkus {@link HttpAuthenticationMechanism} that extracts bearer tokens from the {@code
+ * sse-token} cookie for SSE endpoints.
  *
  * <p>The browser's native {@code EventSource} API cannot send custom HTTP headers. To authenticate
  * SSE streams, the frontend first calls {@code POST /api/v1/containers/{id}/logs/stream/token}
  * (with a standard {@code Authorization: Bearer} header) to obtain a short-lived opaque token
- * delivered as an {@code HttpOnly; Secure; SameSite} cookie. This filter reads that cookie,
- * exchanges the UUID for the associated bearer token via {@link SseTokenStore}, and injects the
- * {@code Authorization: Bearer} header before OIDC authentication runs.
+ * delivered as an {@code HttpOnly; Secure; SameSite} cookie. This mechanism reads that cookie,
+ * exchanges the UUID for the associated bearer token via {@link SseTokenStore}, and delegates it to
+ * the {@link IdentityProviderManager} as a {@link TokenAuthenticationRequest} so that the OIDC
+ * identity provider validates it.
+ *
+ * <p>This <strong>must</strong> be an {@code HttpAuthenticationMechanism} (not a JAX-RS {@code
+ * ContainerRequestFilter} or Vert.x route handler) because Quarkus OIDC authenticates at the HTTP
+ * security layer, which runs before JAX-RS filters and application-level route handlers.
  *
  * <p>The token is <em>not</em> removed on read because {@code EventSource} auto-reconnects and
  * re-sends the same cookie within the TTL window.
  */
-@Provider
-@PreMatching
-@Priority(Priorities.AUTHENTICATION - 100)
-public class BearerTokenSseCookieFilter implements ContainerRequestFilter {
+@ApplicationScoped
+public class BearerTokenSseCookieFilter implements HttpAuthenticationMechanism {
 
     private static final Logger LOG = Logger.getLogger(BearerTokenSseCookieFilter.class);
 
@@ -41,38 +49,73 @@ public class BearerTokenSseCookieFilter implements ContainerRequestFilter {
     /** SSE endpoint path suffix that this filter applies to. */
     static final String SSE_PATH_SUFFIX = "/logs/stream";
 
-    @Inject SseTokenStore sseTokenStore;
+    private final SseTokenStore sseTokenStore;
+
+    @Inject
+    BearerTokenSseCookieFilter(SseTokenStore sseTokenStore) {
+        this.sseTokenStore = sseTokenStore;
+    }
 
     @Override
-    public void filter(ContainerRequestContext requestContext) {
-        UriInfo uriInfo = requestContext.getUriInfo();
-        String path = uriInfo.getPath();
+    public Uni<SecurityIdentity> authenticate(
+            RoutingContext context, IdentityProviderManager identityProviderManager) {
+        String path = context.request().path();
 
         if (!isSseEndpoint(path)) {
-            return;
+            return Uni.createFrom().nullItem();
         }
 
-        String existingAuth = requestContext.getHeaderString(HttpHeaders.AUTHORIZATION);
+        String existingAuth = context.request().getHeader("Authorization");
         if (existingAuth != null && !existingAuth.isBlank()) {
             LOG.debugf("SSE request already has Authorization header, skipping cookie extraction");
-            return;
+            return Uni.createFrom().nullItem();
         }
 
-        Map<String, Cookie> cookies = requestContext.getCookies();
-        Cookie sseCookie = cookies.get(COOKIE_NAME);
+        Cookie sseCookie = context.request().getCookie(COOKIE_NAME);
         if (sseCookie == null) {
             LOG.debugf("No sse-token cookie found for SSE endpoint: %s", path);
-            return;
+            return Uni.createFrom().nullItem();
         }
 
         Optional<String> rawToken = sseTokenStore.getToken(sseCookie.getValue());
         if (rawToken.isEmpty()) {
             LOG.warnf("SSE token lookup failed (expired or unknown) for endpoint: %s", path);
-            return;
+            return Uni.createFrom().nullItem();
         }
 
-        requestContext.getHeaders().putSingle(HttpHeaders.AUTHORIZATION, "Bearer " + rawToken.get());
-        LOG.debugf("Set Authorization header from sse-token cookie for endpoint: %s", path);
+        LOG.debugf("Resolved sse-token cookie, delegating to OIDC IdentityProvider for: %s", path);
+
+        // Delegate the bearer token to OIDC's IdentityProvider for validation.
+        // The RoutingContext must be attached so OidcIdentityProvider can resolve the tenant.
+        TokenAuthenticationRequest tokenRequest =
+                new TokenAuthenticationRequest(new AccessTokenCredential(rawToken.get()));
+        HttpSecurityUtils.setRoutingContextAttribute(tokenRequest, context);
+        return identityProviderManager.authenticate(tokenRequest);
+    }
+
+    @Override
+    public Uni<ChallengeData> getChallenge(RoutingContext context) {
+        return Uni.createFrom().nullItem();
+    }
+
+    @Override
+    public Set<Class<? extends AuthenticationRequest>> getCredentialTypes() {
+        return Set.of(TokenAuthenticationRequest.class);
+    }
+
+    @Override
+    public Uni<Boolean> sendChallenge(RoutingContext context) {
+        return HttpAuthenticationMechanism.super.sendChallenge(context);
+    }
+
+    @Override
+    public Uni<HttpCredentialTransport> getCredentialTransport(RoutingContext context) {
+        return Uni.createFrom().nullItem();
+    }
+
+    @Override
+    public int getPriority() {
+        return HttpAuthenticationMechanism.super.getPriority();
     }
 
     /**

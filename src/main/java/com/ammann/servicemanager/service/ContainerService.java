@@ -352,6 +352,8 @@ public class ContainerService {
                     .exec(callback);
 
             return processor
+                    .onOverflow()
+                    .drop()
                     .onTermination()
                     .invoke(
                             () -> {

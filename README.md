@@ -3,6 +3,8 @@
 [![CI](https://github.com/AmmannChristian/docker-service-manager/actions/workflows/ci.yml/badge.svg)](https://github.com/AmmannChristian/docker-service-manager/actions/workflows/ci.yml)
 [![codecov](https://codecov.io/gh/AmmannChristian/docker-service-manager/graph/badge.svg)](https://app.codecov.io/gh/AmmannChristian/docker-service-manager)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://github.com/AmmannChristian/docker-service-manager/blob/main/LICENSE)
+![Quarkus](https://img.shields.io/badge/Quarkus-3.30.6-blue?logo=quarkus)
+![Java](https://img.shields.io/badge/Java-21-blue?logo=openjdk)
 
 A REST API for managing Docker containers, built with Quarkus. This service provides endpoints for container lifecycle management including starting, stopping, restarting, and updating containers, as well as log streaming capabilities via Server-Sent Events.
 
